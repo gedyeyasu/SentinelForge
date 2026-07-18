@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,7 +7,13 @@ from typing import Any
 
 from sentinelforge.domain import Finding
 from sentinelforge.inference import NIMPatchProposer
-from sentinelforge.remediation import FastAPIBOLAPatcher, materialize_proposal, rank_candidates, CandidateEvaluation, count_changed_lines
+from sentinelforge.remediation import (
+    CandidateEvaluation,
+    FastAPIBOLAPatcher,
+    count_changed_lines,
+    materialize_proposal,
+    rank_candidates,
+)
 from sentinelforge.verification import verify_python_project
 
 

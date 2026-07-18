@@ -82,6 +82,8 @@ const ui = {
   pentestRepository: document.querySelector("#pentest-repository"),
   pentestScope: document.querySelector("#pentest-scope"),
   pentestMode: document.querySelector("#pentest-mode"),
+  pentestTargetType: document.querySelector("#pentest-target-type"),
+  pentestStagingUrl: document.querySelector("#pentest-staging-url"),
   pentestButton: document.querySelector("#pentest-button"),
   pentestError: document.querySelector("#pentest-error"),
   pentestEmpty: document.querySelector("#pentest-empty"),
@@ -180,6 +182,25 @@ const eventDescriptions = {
   no_impact_evidence: ["No-impact evidence", "VEX: vulnerable code not in execute path."],
   exploit_replayed_against_patch: ["Exploit replay blocked", "Mutated exploit blocked after patch - adversarial verification."],
   openshell_audit_completed: ["OpenShell audit done", "Policy enforced, denied actions logged."],
+  openshell_denied: ["Action BLOCKED by OpenShell", "Policy denied action. Agent blocked."],
+  cve_ingestion_completed: ["CVE intelligence loaded", "Recent CVEs, KEV, EPSS data ingested."],
+  threat_learning_completed: ["Threat patterns learned", "Patterns extracted from CVEs and scans."],
+  zero_day_hunting_completed: ["Zero-day hunt complete", "Hypothesis-driven exploration finished."],
+  adaptive_payload_effectiveness: ["Adaptive payload update", "Thompson Sampling updated effectiveness."],
+  swarm_launched: ["Agent swarm launched", "Multiple attack agents spawned in parallel."],
+  swarm_agent_spawned: ["Swarm agent spawned", "A new attack agent started work."],
+  swarm_agent_completed: ["Swarm agent completed", "An attack agent finished its task."],
+  swarm_agent_failed: ["Swarm agent failed", "An attack agent hit an error."],
+  swarm_finished: ["Agent swarm finished", "All parallel attack agents reported back."],
+  hypotheses_generated: ["Novel hypotheses generated", "LLM + composition engine proposed new attacks."],
+  novel_finding: ["NOVEL FINDING", "Near-zero-day class attack succeeded."],
+  intel_enriched: ["Multi-source intel", "OSV + GHSA advisories merged and ranked."],
+  evidence_bundled: ["Evidence bundled", "Findings packaged with hashes and replay commands."],
+  learning_delta_recorded: ["Learning recorded", "Real run metrics stored in target memory."],
+  patch_agent_started: ["Patch agent started", "Analyzing finding for patch generation."],
+  patch_proposed: ["Patch proposed", "NIM/vLLM proposed a minimal fix."],
+  patch_pr_created: ["Draft PR created", "Patch PR opened - human review required."],
+  patch_verification_failed: ["Patch rejected", "Mutated exploit still succeeds against patch."],
 };
 
 function text(node, value) { node.textContent = value == null ? "—" : String(value); }
@@ -837,13 +858,16 @@ const PHASE_ICONS = {
   init: "⚡", ownership_verification: "🔑", environment_check: "🌍",
   scoping: "📋", mapping: "🗺️", dependency_scan: "📦",
   pattern_scan: "🔍", attacking: "⚔️", custom_exploit: "💻",
-  nim_analysis: "🤖", attestation: "📝", safety: "🛡️", openshell: "🔒", complete: "✅",
+  cve_ingestion: "📰", threat_learning: "🧠", zero_day_hunting: "🔮",
+  nim_analysis: "🤖", attestation: "📝", safety: "🛡️", openshell_audit: "🔒",
+  complete: "✅",
 };
 
 const PHASE_ORDER = [
   "init", "ownership_verification", "environment_check", "scoping",
-  "mapping", "dependency_scan", "pattern_scan", "attacking", "custom_exploit",
-  "nim_analysis", "attestation", "complete",
+  "mapping", "dependency_scan", "cve_ingestion", "threat_learning",
+  "zero_day_hunting", "pattern_scan", "attacking", "custom_exploit",
+  "nim_analysis", "openshell_audit", "attestation", "complete",
 ];
 
 function renderLiveProgressBar(phases, currentPhase) {
@@ -877,6 +901,7 @@ function appendLiveEvent(event) {
   if (!feed) return;
   const item = document.createElement("div");
   item.className = `live-event live-${event.kind}`;
+  if (event.kind === "openshell_denied") item.classList.add("highlight-denied");
   const ts = new Date(event.timestamp * 1000);
   const time = document.createElement("span");
   time.className = "live-time";
@@ -1108,7 +1133,27 @@ async function createPentest(e) {
   if (pentestEventSource) { pentestEventSource.close(); pentestEventSource = null; }
   ui.pentestButton.disabled = true; ui.pentestButton.querySelector("span").textContent = "Starting…";
   try {
-    const result = await api("/api/pentest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repository: ui.pentestRepository.value.trim(), scope_file: ui.pentestScope.value.trim(), mode: ui.pentestMode.value }) });
+    const targetType = ui.pentestTargetType?.value || "local";
+    const body = {
+      repository: ui.pentestRepository.value.trim(),
+      scope_file: ui.pentestScope.value.trim(),
+      mode: ui.pentestMode.value,
+      target_type: targetType,
+    };
+    if (targetType === "url") {
+      body.staging_url = ui.pentestStagingUrl?.value.trim() || "";
+      if (!body.staging_url) {
+        showError(ui.pentestError, "Enter a staging URL for live target mode.");
+        ui.pentestButton.disabled = false;
+        ui.pentestButton.querySelector("span").textContent = "Start pentest";
+        return;
+      }
+    }
+    const result = await api("/api/pentest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     if (result.run_id) {
       ui.pentestEmpty.hidden = true; ui.pentestActive.hidden = false;
       text(ui.pentestRunId, result.run_id.toUpperCase());
@@ -1116,7 +1161,11 @@ async function createPentest(e) {
       startPentestStream(result.run_id);
       loadPentestRuns();
     }
-  } catch (err) { ui.pentestButton.disabled = false; ui.pentestButton.querySelector("span").textContent = "Start pentest"; showError(ui.pentestError, err.message); }
+  } catch (err) {
+    ui.pentestButton.disabled = false;
+    ui.pentestButton.querySelector("span").textContent = "Start pentest";
+    showError(ui.pentestError, err.message);
+  }
 }
 
 async function refreshPentestRun(runId) {
@@ -1268,6 +1317,18 @@ function initialize() {
   ui.pentestForm.addEventListener("submit", createPentest);
   ui.pentestRepeat.addEventListener("click", () => createPentest());
   ui.refreshPentestRuns.addEventListener("click", loadPentestRuns);
+  if (ui.pentestTargetType) {
+    ui.pentestTargetType.addEventListener("change", () => {
+      const isUrl = ui.pentestTargetType.value === "url";
+      ui.pentestRepository.hidden = isUrl;
+      ui.pentestStagingUrl.hidden = !isUrl;
+      ui.pentestStagingUrl.required = isUrl;
+      ui.pentestRepository.required = !isUrl;
+      if (isUrl) {
+        ui.pentestStagingUrl.placeholder = "https://staging.example.com";
+      }
+    });
+  }
   ui.ownershipType.addEventListener("change", () => { ui.ownershipChallengeArea.hidden = ui.ownershipType.value === "none"; });
   ui.ownershipCreate.addEventListener("click", createOwnershipChallenge);
   ui.ownershipVerify.addEventListener("click", verifyOwnership);

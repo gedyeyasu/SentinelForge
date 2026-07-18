@@ -82,6 +82,8 @@ class PentestRunRequest(BaseModel):
     scope_file: str = Field(default="config/scope.yaml")
     attack_only_source: bool = False
     mode: PentestMode = Field(default=PentestMode.STANDARD)
+    target_type: str = Field(default="local")
+    staging_url: str = Field(default="")
 
 
 class PentestRunRecord(BaseModel):
@@ -92,6 +94,8 @@ class PentestRunRecord(BaseModel):
     phase: PentestPhase
     candidate_verdict: SecurityVerdict
     mode: str = "standard"
+    target_type: str = "local"
+    staging_url: str = ""
     created_at: str
     updated_at: str
     results: dict[str, object] | None = None

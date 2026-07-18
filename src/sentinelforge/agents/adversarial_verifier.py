@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from sentinelforge.agents import ExploitOutcome, ExploitReceipt
 from sentinelforge.agents.payload_synthesizer import NemotronPayloadSynthesizer, SynthesizedPayload

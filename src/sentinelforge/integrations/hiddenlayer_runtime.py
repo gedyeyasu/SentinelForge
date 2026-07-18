@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 import uuid
-import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -286,7 +286,7 @@ class HiddenLayerRuntimeSecurity:
             has_pii = any(s.signal == "personally_identifiable_information" or "pii" in s.signal.lower() for s in signals)
             has_code = any(s.signal == "code" for s in signals)
             has_dos = any(s.signal == "denial_of_service" or "dos" in s.signal.lower() for s in signals)
-            has_url_exfil = any(s.signal == "url" for s in signals and s.score > 0.8)
+            has_url_exfil = any(s.signal == "url" and s.score > 0.8 for s in signals)
 
             if has_prompt_injection:
                 return RuntimeAction.SELF_CORRECT  # Withhold flagged content, send security notice so model self-corrects
@@ -501,7 +501,7 @@ class HiddenLayerRuntimeSecurity:
                 logger.debug("v1 fallback failed: %s", e)
 
         # Final fallback: local pattern detection
-        from sentinelforge.integrations.hiddenlayer import local_injection_scan, HiddenLayerVerdict
+        from sentinelforge.integrations.hiddenlayer import HiddenLayerVerdict, local_injection_scan
 
         local_result = local_injection_scan(content)
         if local_result.verdict == HiddenLayerVerdict.MALICIOUS:

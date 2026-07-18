@@ -2153,3 +2153,25 @@ input:hover {
   border-left: 3px solid var(--warning);
   background: var(--warning-soft);
 }
+.live-event.highlight-denied,
+.live-event.live-openshell_denied {
+  border-left: 3px solid #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+  color: #fca5a5;
+}
+.live-event.highlight-denied .live-badge {
+  background: #991b1b;
+  color: #fecaca;
+}
+.live-event.live-cve_ingestion_completed {
+  border-left: 3px solid #818cf8;
+  background: rgba(129, 140, 248, 0.06);
+}
+.live-event.live-threat_learning_completed {
+  border-left: 3px solid #c084fc;
+  background: rgba(192, 132, 252, 0.06);
+}
+.live-event.live-zero_day_hunting_completed {
+  border-left: 3px solid #f472b6;
+  background: rgba(244, 114, 182, 0.06);
+}

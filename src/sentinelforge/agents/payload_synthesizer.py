@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -87,7 +87,9 @@ class NemotronPayloadSynthesizer:
             self._runtime = runtime_security
         else:
             try:
-                from sentinelforge.integrations.hiddenlayer_runtime import HiddenLayerRuntimeSecurity
+                from sentinelforge.integrations.hiddenlayer_runtime import (
+                    HiddenLayerRuntimeSecurity,
+                )
 
                 self._runtime = HiddenLayerRuntimeSecurity()
             except Exception:

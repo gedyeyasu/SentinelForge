@@ -351,6 +351,110 @@ def create_app(
             },
         )
 
+    @app.post("/api/pentest/{run_id}/patch-pr")
+    def create_patch_pr_for_finding(
+        run_id: str,
+        finding_id: str = Query(min_length=1),
+        create_pr: bool = Query(default=False),
+    ) -> dict[str, object]:
+        """Run the patch-PR agent for one confirmed finding.
+
+        Human-gated: ``create_pr`` defaults to False — patches are proposed
+        and verified internally; a draft PR is only created when the caller
+        explicitly opts in (human approval boundary).
+        """
+        pentest = service.store.get_pentest_run(run_id)
+        if pentest is None:
+            raise HTTPException(status_code=404, detail="Pentest run not found")
+
+        results = pentest.results or {}
+        receipts = results.get("receipts", [])
+        matching = [
+            r for r in receipts
+            if r.get("finding_id") == finding_id
+        ]
+        if not matching:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No receipt found for finding {finding_id}",
+            )
+
+        from sentinelforge.domain import Finding, Severity
+        from sentinelforge.event_bus import EventBus
+        from sentinelforge.inference.fallback import FallbackPatchProposer
+        from sentinelforge.inference.nvidia_nim import NIMPatchProposer
+        from sentinelforge.inference.vllm import VLLMPatchProposer
+        from sentinelforge.patchflow import PatchPRAgent
+
+        receipt = matching[0]
+        severity_map = {
+            "critical": Severity.CRITICAL,
+            "high": Severity.HIGH,
+            "medium": Severity.MEDIUM,
+            "low": Severity.LOW,
+        }
+        finding = Finding(
+            finding_id=finding_id,
+            rule_id=receipt.get("agent_role", "pentest"),
+            title=receipt.get("expected_invariant", finding_id)[:200],
+            severity=severity_map.get(
+                str(receipt.get("severity", "high")).lower(),
+                Severity.HIGH,
+            ),
+            path=receipt.get("target_url", ""),
+            line=0,
+            function="",
+            endpoint=receipt.get("target_url", ""),
+            method=receipt.get("method", "GET"),
+            description=receipt.get("observed_behavior", "")[:500],
+            invariant=receipt.get("expected_invariant", ""),
+            evidence={"receipt": receipt},
+            remediation="",
+            confidence=float(receipt.get("confidence", 0.8)),
+        )
+
+        proposer = None
+        try:
+            nvidia = resolve_nvidia_config()
+            if nvidia.configured:
+                proposer = FallbackPatchProposer(
+                    nim_proposer=NIMPatchProposer(
+                        api_key=nvidia.api_key,
+                        model=nvidia.model,
+                        base_url=nvidia.base_url,
+                    ),
+                    vllm_proposer=VLLMPatchProposer(),
+                )
+        except Exception:
+            proposer = None
+
+        bus = EventBus.instance()
+        agent = PatchPRAgent(
+            run_id=run_id,
+            bus=bus,
+            proposer=proposer,
+            pr_creator=None,
+            repository=Path(pentest.repository),
+        )
+        result = agent.process_finding(
+            finding, None, create_pr=create_pr
+        )
+        service.store.append_event(
+            run_id,
+            phase="patch_pr",
+            kind="patch_pr_agent_completed",
+            payload=result.to_dict(),
+        )
+        return {
+            "run_id": run_id,
+            "finding_id": finding_id,
+            "result": result.to_dict(),
+            "note": (
+                "Draft PR creation requires create_pr=true and a "
+                "configured GitHub token. Human review is always required."
+            ),
+        }
+
     @app.post("/api/pentest/schedule")
     def create_pentest_schedule(
         repository: str = Query(min_length=1),

@@ -21,11 +21,14 @@ class Phase(StrEnum):
     OWNERSHIP_VERIFICATION = "ownership_verification"
     ENVIRONMENT_CHECK = "environment_check"
     SCOPING = "scoping"
+    CVE_INGESTION = "cve_ingestion"
     MAPPING = "mapping"
     DEPENDENCY_SCAN = "dependency_scan"
     PATTERN_SCAN = "pattern_scan"
+    THREAT_LEARNING = "threat_learning"
     AUTH_ATTACK = "auth_attack"
     INJECTION_ATTACK = "injection_attack"
+    ZERO_DAY_HUNTING = "zero_day_hunting"
     CUSTOM_EXPLOIT = "custom_exploit"
     HIDDENLAYER_SCAN = "hiddenlayer_scan"
     OPENSHELL_AUDIT = "openshell_audit"
@@ -39,11 +42,14 @@ PHASE_ORDER: list[Phase] = [
     Phase.OWNERSHIP_VERIFICATION,
     Phase.ENVIRONMENT_CHECK,
     Phase.SCOPING,
+    Phase.CVE_INGESTION,
     Phase.MAPPING,
     Phase.DEPENDENCY_SCAN,
     Phase.PATTERN_SCAN,
+    Phase.THREAT_LEARNING,
     Phase.AUTH_ATTACK,
     Phase.INJECTION_ATTACK,
+    Phase.ZERO_DAY_HUNTING,
     Phase.CUSTOM_EXPLOIT,
     Phase.HIDDENLAYER_SCAN,
     Phase.OPENSHELL_AUDIT,
@@ -57,11 +63,14 @@ PHASE_TO_PENTEST_PHASE: dict[Phase, PentestPhase] = {
     Phase.OWNERSHIP_VERIFICATION: PentestPhase.SCOPING,
     Phase.ENVIRONMENT_CHECK: PentestPhase.SCOPING,
     Phase.SCOPING: PentestPhase.SCOPING,
+    Phase.CVE_INGESTION: PentestPhase.SCOPING,
     Phase.MAPPING: PentestPhase.MAPPING,
     Phase.DEPENDENCY_SCAN: PentestPhase.MAPPING,
     Phase.PATTERN_SCAN: PentestPhase.MAPPING,
+    Phase.THREAT_LEARNING: PentestPhase.MAPPING,
     Phase.AUTH_ATTACK: PentestPhase.ATTACKING,
     Phase.INJECTION_ATTACK: PentestPhase.ATTACKING,
+    Phase.ZERO_DAY_HUNTING: PentestPhase.ATTACKING,
     Phase.CUSTOM_EXPLOIT: PentestPhase.ATTACKING,
     Phase.HIDDENLAYER_SCAN: PentestPhase.ATTACKING,
     Phase.OPENSHELL_AUDIT: PentestPhase.ATTACKING,
@@ -75,11 +84,14 @@ _PHASE_NAMES: dict[Phase, str] = {
     Phase.OWNERSHIP_VERIFICATION: "Verifying Ownership",
     Phase.ENVIRONMENT_CHECK: "Checking Environment",
     Phase.SCOPING: "Validating Scope",
+    Phase.CVE_INGESTION: "Ingesting CVE Intelligence (NVD/KEV/EPSS)",
     Phase.MAPPING: "Mapping Attack Surface",
     Phase.DEPENDENCY_SCAN: "Scanning Dependencies",
     Phase.PATTERN_SCAN: "Scanning for Exploit Patterns",
+    Phase.THREAT_LEARNING: "Learning Threat Patterns",
     Phase.AUTH_ATTACK: "Running Auth Attacks (7 techniques)",
-    Phase.INJECTION_ATTACK: "Running Injection Attacks (Nemotron synthesis)",
+    Phase.INJECTION_ATTACK: "Running Injection Attacks (Adaptive Payloads)",
+    Phase.ZERO_DAY_HUNTING: "Hunting Zero-Day Vulnerabilities",
     Phase.CUSTOM_EXPLOIT: "Writing Custom Exploit (Agent-written Python)",
     Phase.HIDDENLAYER_SCAN: "HiddenLayer AI Scan",
     Phase.OPENSHELL_AUDIT: "OpenShell Audit",
@@ -147,16 +159,24 @@ class AgentOrchestrator:
             phases.append(Phase.ENVIRONMENT_CHECK)
 
         phases.append(Phase.SCOPING)
+
+        if config.run_cve_ingestion:
+            phases.append(Phase.CVE_INGESTION)
+
         phases.append(Phase.MAPPING)
 
         if config.run_dependency_scan:
             phases.append(Phase.DEPENDENCY_SCAN)
         if config.run_pattern_scan:
             phases.append(Phase.PATTERN_SCAN)
+        if config.run_threat_learning:
+            phases.append(Phase.THREAT_LEARNING)
         if config.run_auth_attacks:
             phases.append(Phase.AUTH_ATTACK)
         if config.run_injection_attacks:
             phases.append(Phase.INJECTION_ATTACK)
+        if config.run_zero_day_hunting:
+            phases.append(Phase.ZERO_DAY_HUNTING)
         if config.run_custom_exploit:
             phases.append(Phase.CUSTOM_EXPLOIT)
         if config.run_hiddenlayer_scan:

@@ -1,0 +1,36 @@
+{
+  "algorithm": "hmac-sha256-demo",
+  "attestation": {
+    "candidate_verdict": "SAFE",
+    "compliance": {
+      "evidence_standard": "PLAN \u00a77.3 8 fields",
+      "human_approval_required": true,
+      "no_prod_target": true,
+      "patch_standard": "PLAN \u00a77.4 7 criteria",
+      "secret_redaction_verified": true
+    },
+    "event_chain_hashes": [
+      "c7f4e6abb2d59729ff758a57635dd68c0e1c721a50c18b1c4b407fbae876bf10",
+      "fa0c2da1f3cdbe7b1effcce34d111e662396dd6e24f630673687770ce69ed6a3",
+      "c772f6551f0692469d0d3401c48dbb748c671c21c42b681c4fa06f6e9009b3e8",
+      "ca2fcd7eb379839ab22165806bcbf122778b44b34e4836cb53676d2c024e1570",
+      "7350baa42f935f15f4f14b367cd60674946af41a987ba2b87c010e2da64b3601"
+    ],
+    "event_chain_head": "7350baa42f935f15f4f14b367cd60674946af41a987ba2b87c010e2da64b3601",
+    "event_count": 27,
+    "patch_verdict": "SAFE",
+    "public_key": "0804e4e86f15027d00ef3a2d129551f2a5bea12074f8be9c87e2a3b8b2497c16",
+    "results_summary": {
+      "dep_vulns": 0,
+      "pattern_findings": 0,
+      "receipts": 1,
+      "routes": 1
+    },
+    "run_id": "sf_pentest_fd8fa2da8b91",
+    "threat_assessment": null,
+    "version": "0.2.0"
+  },
+  "evidence_hash": "c6700cd4857121abd94341243a69da057687a3cd347ddfdc9022d4d6f1262f08",
+  "public_key": "0804e4e86f15027d00ef3a2d129551f2a5bea12074f8be9c87e2a3b8b2497c16",
+  "signature": "ca6203f099376345ebd990c06ae3683e1ce61a7548d6e71bc0aaca995eaaa37e"
+}

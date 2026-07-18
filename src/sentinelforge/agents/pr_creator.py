@@ -287,7 +287,7 @@ class PatchAndPRAgent:
                 owner=owner,
                 repo=repo,
             )
-        except Exception as e:
+        except Exception:
             # PR creation may fail if not a GitHub repo or no gh CLI, but patch still verified
             pr_result = None
 
@@ -340,7 +340,7 @@ class PatchAndPRAgent:
                 f"Patch generated: {selected.model_used} - {selected.files_changed}",
                 f"Verification: {verify_result.blocked_count}/{verify_result.mutations_tested} mutated exploits blocked - {'PATCH VERIFIED' if verify_result.all_blocked else 'REJECTED'}",
                 f"PR created: {pr_result.pr_url if pr_result else 'failed'} - draft, requires human review",
-                f"Release: BLOCKED until human approval per safety boundary",
+                "Release: BLOCKED until human approval per safety boundary",
             ],
         }
 

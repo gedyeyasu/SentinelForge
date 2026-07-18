@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from sentinelforge.control.models import PentestPhase
 from sentinelforge.control.storage import SQLiteRunStore
 from sentinelforge.nemoclaw.heartbeat import NemoClawHeartbeat
 from sentinelforge.orchestrator import AgentOrchestrator, Phase
@@ -49,7 +48,7 @@ class NemoClawOrchestrator(AgentOrchestrator):
 
     def load_target_memory(self, target_id: str) -> dict[str, Any] | None:
         """Load persistent memory for target to demonstrate learning delta"""
-        mem = self.store.get_target_memory(target_id)
+        mem = self._store.get_target_memory(target_id)
         if mem:
             self._target_memory[target_id] = mem
             logger.info(
@@ -70,7 +69,7 @@ class NemoClawOrchestrator(AgentOrchestrator):
         learning_delta: dict[str, Any] | None = None,
     ) -> None:
         """Save target memory for persistent learning"""
-        self.store.upsert_target_memory(
+        self._store.upsert_target_memory(
             target_id=target_id,
             base_url=base_url,
             endpoint_map=endpoint_map,
@@ -133,28 +132,133 @@ class NemoClawOrchestrator(AgentOrchestrator):
             return {"error": str(e)}
 
     def get_learning_delta(self, target_id: str) -> dict[str, Any]:
-        """Calculate learning delta for demo: Run1 vs Run2"""
-        mem = self._target_memory.get(target_id) or self.store.get_target_memory(target_id)
+        """Return real learning delta computed from target_memory run metrics.
+
+        learning_delta_json schema (written by record_run_metrics):
+        {
+            "last_run": {run metrics...},
+            "previous_run": {run metrics...} | None,
+            "delta": {metric: {"run1": x, "run2": y, "delta_pct": z}} | None,
+        }
+        If fewer than 2 runs exist, returns an honest insufficient-data state.
+        """
+        import json
+
+        mem = self._target_memory.get(target_id) or self._store.get_target_memory(target_id)
         if not mem:
             return {
-                "auth_discovery_time": {"run1": "4.2s", "run2": "1.1s", "delta": "-73%"},
-                "attack_coverage": {"run1": "8/12", "run2": "12/12", "delta": "+50%"},
-                "tool_calls": {"run1": 42, "run2": 14, "delta": "-66%"},
-                "token_cost": {"run1": "18.4k", "run2": "6.1k", "delta": "-66%"},
+                "status": "no_data",
+                "message": (
+                    "No target memory yet. Run a pentest twice against the "
+                    "same target to compute a learning delta."
+                ),
+                "run_count": 0,
             }
 
-        # Try to parse stored learning_delta
         try:
-            import json
-
             delta_json = mem.get("learning_delta_json", "{}")
-            if isinstance(delta_json, str):
-                delta = json.loads(delta_json)
-            else:
-                delta = delta_json
-            return delta or {
-                "run_count": mem.get("run_count", 1),
-                "endpoint_map_size": len(mem.get("endpoint_map_json", "[]")),
-            }
+            delta = json.loads(delta_json) if isinstance(delta_json, str) else delta_json
         except Exception:
-            return {"run_count": mem.get("run_count", 1)}
+            delta = {}
+
+        run_count = mem.get("run_count", 1)
+        if not delta or not delta.get("delta"):
+            return {
+                "status": "insufficient_runs",
+                "message": (
+                    f"Target seen {run_count} time(s). Learning delta "
+                    "requires 2+ completed runs against the same target."
+                ),
+                "run_count": run_count,
+                "endpoint_map_size": len(
+                    json.loads(mem.get("endpoint_map_json", "[]"))
+                    if isinstance(mem.get("endpoint_map_json"), str)
+                    else mem.get("endpoint_map_json", [])
+                ),
+                "prior_attacks": len(
+                    json.loads(mem.get("prior_attacks_json", "[]"))
+                    if isinstance(mem.get("prior_attacks_json"), str)
+                    else mem.get("prior_attacks_json", [])
+                ),
+            }
+
+        return {
+            "status": "computed",
+            "run_count": run_count,
+            **delta,
+        }
+
+    def record_run_metrics(
+        self,
+        target_id: str,
+        base_url: str,
+        metrics: dict[str, Any],
+        *,
+        endpoint_map: list[dict[str, Any]],
+        role_graph: dict[str, Any],
+        prior_attacks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Record real per-run metrics and compute delta vs previous run.
+
+        Called at attestation time with actual measured values:
+        routes, receipts, duration_s, tool_calls, prompt_tokens,
+        completion_tokens, successful_attacks.
+        """
+        import json
+
+        existing = self._store.get_target_memory(target_id) or {}
+        try:
+            old_delta_json = existing.get("learning_delta_json", "{}")
+            old_delta = (
+                json.loads(old_delta_json)
+                if isinstance(old_delta_json, str)
+                else old_delta_json
+            )
+        except Exception:
+            old_delta = {}
+
+        previous_run = old_delta.get("last_run")
+        delta = (
+            self._compute_delta(previous_run, metrics) if previous_run else None
+        )
+        new_payload = {
+            "last_run": metrics,
+            "previous_run": previous_run,
+            "delta": delta,
+        }
+        self.save_target_memory(
+            target_id,
+            base_url,
+            endpoint_map,
+            role_graph,
+            prior_attacks,
+            learning_delta=new_payload,
+        )
+        return new_payload
+
+    @staticmethod
+    def _compute_delta(
+        run1: dict[str, Any], run2: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Compute percentage deltas between two real run metric sets."""
+        delta: dict[str, Any] = {}
+        for key in (
+            "routes",
+            "receipts",
+            "duration_s",
+            "tool_calls",
+            "prompt_tokens",
+            "completion_tokens",
+            "successful_attacks",
+        ):
+            v1, v2 = run1.get(key), run2.get(key)
+            if isinstance(v1, (int, float)) and isinstance(v2, (int, float)):
+                pct = (
+                    round((v2 - v1) / v1 * 100, 1) if v1 else None
+                )
+                delta[key] = {
+                    "run1": v1,
+                    "run2": v2,
+                    "delta_pct": pct,
+                }
+        return delta

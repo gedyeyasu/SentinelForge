@@ -88,6 +88,7 @@ def vllm_health_command(args: argparse.Namespace) -> int:
 def bench_command(args: argparse.Namespace) -> int:
     import asyncio
     import time
+
     from sentinelforge.detectors import FastAPIBOLADetector
 
     root = Path(args.repository)

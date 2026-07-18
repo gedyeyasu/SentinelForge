@@ -272,9 +272,17 @@
                 <p>Configure target ownership proof, scope policy, and run multi-agent adversarial testing.</p>
               </div>
               <form id="pentest-form" class="run-form">
+                <div class="input-row">
+                  <label for="pentest-target-type">Target type</label>
+                  <select id="pentest-target-type">
+                    <option value="local" selected>Local repository</option>
+                    <option value="url">Deployed staging URL</option>
+                  </select>
+                </div>
                 <label for="pentest-repository">Repository path</label>
                 <div class="input-row">
                   <input id="pentest-repository" value="examples/vulnerable_shop" autocomplete="off" spellcheck="false" required />
+                  <input id="pentest-staging-url" placeholder="https://staging.example.com" autocomplete="off" spellcheck="false" hidden />
                   <button class="primary-button" id="pentest-button" type="submit">
                     <span>Start pentest</span><span aria-hidden="true">→</span>
                   </button>

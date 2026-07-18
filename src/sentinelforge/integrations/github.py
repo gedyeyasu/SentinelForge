@@ -58,8 +58,8 @@ class GitHubClient:
         if not resolved_token:
             # Try OAuth file
             try:
-                from pathlib import Path
                 import json
+                from pathlib import Path
 
                 oauth_file = Path(".sentinelforge/github_token.json")
                 if oauth_file.is_file():

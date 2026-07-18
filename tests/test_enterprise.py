@@ -2,16 +2,14 @@
 import json
 from pathlib import Path
 
-import httpx
-
+from sentinelforge.agents import ExploitOutcome, ExploitReceipt
 from sentinelforge.agents.adversarial_verifier import AdversarialVerifier
 from sentinelforge.agents.finding_validator import FindingValidator
 from sentinelforge.agents.payload_synthesizer import NemotronPayloadSynthesizer, SynthesizerConfig
 from sentinelforge.agents.sbom import SBOMParser
 from sentinelforge.agents.vex import VEXEvaluator
-from sentinelforge.agents import ExploitOutcome, ExploitReceipt
 from sentinelforge.attestation import AttestationSigner
-from sentinelforge.config import resolve_nvidia_config, resolve_vllm_config
+from sentinelforge.config import resolve_vllm_config
 from sentinelforge.control.storage import SQLiteRunStore
 from sentinelforge.inference.vllm import VLLMPatchProposer
 from sentinelforge.integrations.github import GitHubClient

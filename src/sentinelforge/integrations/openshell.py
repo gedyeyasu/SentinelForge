@@ -63,9 +63,17 @@ class PolicyDecision:
 
 
 class OpenShellPolicyEngine:
-    def __init__(self, policy: OpenShellPolicy) -> None:
+    def __init__(
+        self,
+        policy: OpenShellPolicy,
+        *,
+        run_id: str | None = None,
+        bus: Any | None = None,
+    ) -> None:
         self._policy = policy
         self._audit_log: list[dict[str, Any]] = []
+        self._run_id = run_id
+        self._bus = bus
 
     @property
     def policy(self) -> OpenShellPolicy:
@@ -87,6 +95,8 @@ class OpenShellPolicyEngine:
                     "category": rule.category,
                 }
             )
+            if not allowed and self._bus and self._run_id:
+                self._emit_denial(operation, rule)
             return PolicyDecision(
                 allowed=allowed,
                 rule=rule,
@@ -102,11 +112,43 @@ class OpenShellPolicyEngine:
                 "category": "default",
             }
         )
+        if not allowed and self._bus and self._run_id:
+            self._emit_denial(
+                operation, None, reason="default deny"
+            )
         return PolicyDecision(
             allowed=allowed,
             rule=None,
             reason=f"No matching rule; default action: {self._policy.default_action.value}",
         )
+
+    def _emit_denial(
+        self,
+        operation: str,
+        rule: Any,
+        reason: str = "",
+    ) -> None:
+        import time as _time
+
+        from sentinelforge.event_bus import LiveEvent
+
+        desc = rule.description if rule else reason or "policy denied"
+        cat = rule.category if rule else "default"
+        severity = getattr(rule, "severity", "high") if rule else "high"
+        self._bus.publish(LiveEvent(
+            run_id=self._run_id,
+            phase="openshell_audit",
+            kind="openshell_denied",
+            timestamp=_time.time(),
+            payload={
+                "agent": "OpenShell",
+                "operation": operation[:300],
+                "rule": desc,
+                "category": cat,
+                "severity": severity,
+                "message": f"BLOCKED: {desc} [{cat}]",
+            },
+        ))
 
     def check_http_request(
         self, method: str, url: str, headers: dict[str, str] | None = None

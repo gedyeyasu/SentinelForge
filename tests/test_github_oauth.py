@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from sentinelforge.integrations.github_oauth import GitHubOAuthManager, OAuthConfig, GitHubToken
+from sentinelforge.integrations.github_oauth import GitHubOAuthManager, GitHubToken, OAuthConfig
 
 
 def test_oauth_config_status(tmp_path):

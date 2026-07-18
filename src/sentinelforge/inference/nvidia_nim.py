@@ -51,7 +51,9 @@ class NIMPatchProposer:
             self._runtime = runtime_security
         else:
             try:
-                from sentinelforge.integrations.hiddenlayer_runtime import HiddenLayerRuntimeSecurity
+                from sentinelforge.integrations.hiddenlayer_runtime import (
+                    HiddenLayerRuntimeSecurity,
+                )
 
                 self._runtime = HiddenLayerRuntimeSecurity(session_id=session_id or f"nim_{model}")
             except Exception:

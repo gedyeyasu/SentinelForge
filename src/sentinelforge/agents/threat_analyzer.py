@@ -73,6 +73,9 @@ class NIMThreatAnalyzer:
         pattern_findings: dict[str, Any] | None = None,
         injection_results: list[dict[str, Any]] | None = None,
         exploit_receipts: list[dict[str, Any]] | None = None,
+        cve_intel: dict[str, Any] | None = None,
+        threat_patterns: list[dict[str, Any]] | None = None,
+        zero_day_hypotheses: list[dict[str, Any]] | None = None,
     ) -> ThreatAssessment:
         prompt = self._build_analysis_prompt(
             findings_summary=findings_summary,
@@ -80,6 +83,9 @@ class NIMThreatAnalyzer:
             pattern_findings=pattern_findings,
             injection_results=injection_results,
             exploit_receipts=exploit_receipts,
+            cve_intel=cve_intel,
+            threat_patterns=threat_patterns,
+            zero_day_hypotheses=zero_day_hypotheses,
         )
         started = time.monotonic()
         response = self._client.post(
@@ -126,6 +132,9 @@ class NIMThreatAnalyzer:
         pattern_findings: dict[str, Any] | None,
         injection_results: list[dict[str, Any]] | None,
         exploit_receipts: list[dict[str, Any]] | None,
+        cve_intel: dict[str, Any] | None = None,
+        threat_patterns: list[dict[str, Any]] | None = None,
+        zero_day_hypotheses: list[dict[str, Any]] | None = None,
     ) -> str:
         parts = [
             "Analyze these security scan results and provide a threat assessment.\n",
@@ -152,6 +161,32 @@ class NIMThreatAnalyzer:
                 "EXPLOIT RECEIPTS:\n"
                 f"{json.dumps(exploit_receipts, indent=2, sort_keys=True)}\n"
             )
+        if cve_intel:
+            recent = cve_intel.get("recent_cves", [])[:5]
+            if recent:
+                parts.append(
+                    "RECENT CVE INTELLIGENCE (last 30 days):\n"
+                    f"{json.dumps(recent, indent=2)[:2000]}\n"
+                )
+        if threat_patterns:
+            parts.append(
+                "LEARNED THREAT PATTERNS from prior scans:\n"
+                f"{json.dumps(threat_patterns[:10], indent=2)[:1500]}\n"
+            )
+        if zero_day_hypotheses:
+            hyps = [
+                h for h in zero_day_hypotheses
+                if h.get("status") not in ("excluded",)
+            ][:5]
+            if hyps:
+                parts.append(
+                    "ZERO-DAY HYPOTHESES being investigated:\n"
+                    f"{json.dumps(hyps, indent=2)[:1500]}\n"
+                )
+        parts.append(
+            "Consider the intelligence context above when "
+            "prioritizing risks and recommending mitigations.\n"
+        )
 
         schema = {
             "risk_level": "critical|high|medium|low|info",

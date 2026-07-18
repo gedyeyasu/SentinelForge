@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from sentinelforge.environment import (
     EnvironmentClassification,
     EnvironmentDetector,

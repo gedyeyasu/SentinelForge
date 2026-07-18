@@ -72,6 +72,8 @@ class SQLiteRunStore:
                     phase TEXT NOT NULL,
                     candidate_verdict TEXT NOT NULL,
                     mode TEXT NOT NULL DEFAULT 'standard',
+                    target_type TEXT NOT NULL DEFAULT 'local',
+                    staging_url TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     results_json TEXT,
@@ -150,6 +152,17 @@ class SQLiteRunStore:
                 CREATE INDEX IF NOT EXISTS traces_role_idx ON agent_traces(agent_role);
                 """
             )
+            for col, default in [
+                ("target_type", "'local'"),
+                ("staging_url", "''"),
+            ]:
+                try:
+                    connection.execute(
+                        f"ALTER TABLE pentest_runs ADD COLUMN {col} "
+                        f"TEXT NOT NULL DEFAULT {default}"
+                    )
+                except sqlite3.OperationalError:
+                    pass
 
     def create_run(self, run_id: str, repository: Path) -> RunRecord:
         now = utc_now()
@@ -293,8 +306,9 @@ class SQLiteRunStore:
                 """
                 INSERT INTO pentest_runs (
                     run_id, repository, scope_file, status, phase,
-                    candidate_verdict, mode, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    candidate_verdict, mode, target_type, staging_url,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -304,6 +318,8 @@ class SQLiteRunStore:
                     PentestPhase.SCOPING.value,
                     SecurityVerdict.PENDING.value,
                     request.mode.value,
+                    request.target_type,
+                    request.staging_url,
                     now,
                     now,
                 ),
@@ -370,6 +386,14 @@ class SQLiteRunStore:
             phase=PentestPhase(str(row["phase"])),
             candidate_verdict=SecurityVerdict(str(row["candidate_verdict"])),
             mode=str(row["mode"]) if "mode" in row.keys() else "standard",
+            target_type=(
+                str(row["target_type"])
+                if "target_type" in row.keys() else "local"
+            ),
+            staging_url=(
+                str(row["staging_url"])
+                if "staging_url" in row.keys() else ""
+            ),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
             results=json.loads(str(row["results_json"])) if row["results_json"] else None,
@@ -396,6 +420,14 @@ class SQLiteRunStore:
             phase=PentestPhase(str(row["phase"])),
             candidate_verdict=SecurityVerdict(str(row["candidate_verdict"])),
             mode=str(row["mode"]) if "mode" in row.keys() else "standard",
+            target_type=(
+                str(row["target_type"])
+                if "target_type" in row.keys() else "local"
+            ),
+            staging_url=(
+                str(row["staging_url"])
+                if "staging_url" in row.keys() else ""
+            ),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
             results=json.loads(str(row["results_json"])) if row["results_json"] else None,

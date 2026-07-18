@@ -54,6 +54,34 @@ class ScopeConfig:
                 return identity
         return None
 
+    def with_target_url(self, base_url: str) -> ScopeConfig:
+        """Return a copy with the target base URL overridden."""
+        from urllib.parse import urlparse
+
+        host = urlparse(base_url).hostname or ""
+        allowed = self.allowed_hosts
+        if host and host not in allowed:
+            allowed = (*allowed, host)
+        return ScopeConfig(
+            target=TargetConfig(
+                base_url=base_url.rstrip("/"),
+                ownership_verified=self.target.ownership_verified,
+                openapi_path=self.target.openapi_path,
+            ),
+            allowed_hosts=allowed,
+            allowed_methods=self.allowed_methods,
+            forbidden_paths=self.forbidden_paths,
+            max_requests_per_second=self.max_requests_per_second,
+            max_total_requests=self.max_total_requests,
+            allow_destructive_payloads=self.allow_destructive_payloads,
+            allow_denial_of_service=self.allow_denial_of_service,
+            allow_persistence=self.allow_persistence,
+            allow_data_exfiltration=self.allow_data_exfiltration,
+            allow_production=self.allow_production,
+            test_identities=self.test_identities,
+            kill_switch_file=self.kill_switch_file,
+        )
+
 
 def _require_string(value: Any, path: str) -> str:
     if not isinstance(value, str) or not value.strip():

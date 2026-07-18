@@ -4,7 +4,6 @@ import hashlib
 import re
 from typing import Any
 
-
 # Patterns that must never appear in persisted events, PR bodies, or attestations
 SECRET_PATTERNS = [
     re.compile(r"(?i)(bearer\s+[A-Za-z0-9\-_\.=]+)"),

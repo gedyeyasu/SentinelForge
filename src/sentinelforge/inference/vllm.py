@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field, ValidationError
 from sentinelforge.domain import Finding
 from sentinelforge.inference.base import PatchProposal, ProposedFile
 
-
 DEFAULT_VLLM_BASE_URL = "http://localhost:8000/v1"
 DEFAULT_VLLM_MODEL = "nvidia/nemotron-3-nano-30b-a3b"
 
