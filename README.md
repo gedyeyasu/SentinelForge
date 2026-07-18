@@ -24,6 +24,18 @@ curl -X POST http://127.0.0.1:8741/api/runs \
 
 The API accepts repositories only beneath `SENTINELFORGE_ALLOWED_ROOTS` (the current directory by default). Every lifecycle change and security decision is stored as an append-only SQLite event. Candidate and patch verdicts remain separate: the vulnerable source is `blocked`, while only the exact verified patched artifact can become `safe`.
 
+## NVIDIA Nemotron patch worker
+
+NVIDIA NIM exposes an OpenAI-compatible `/v1/chat/completions` API. SentinelForge uses it only to propose bounded file replacements; the model never decides whether its patch is safe. Each proposal is confined to the vulnerable source file plus `tests/`, materialized in a separate workspace, tested, and ranked against the deterministic baseline.
+
+```bash
+export NVIDIA_API_KEY='set-this-locally-never-commit-it'
+.venv/bin/sentinelforge nim-health
+.venv/bin/sentinelforge nim-remediate examples/vulnerable_shop
+```
+
+`NIM_BASE_URL` and `NIM_MODEL` are configurable so the same adapter can target the hosted NVIDIA endpoint, a local NIM, or vLLM later. Without a key, the deterministic detection and remediation path remains fully operational.
+
 The controlled fixture is deliberately vulnerable and must never be publicly deployed. Remediation happens only in `.sentinelforge/runs/<finding-id>/patched`; SentinelForge does not modify the source repository, push a branch, open a pull request, merge, deploy, or send attack traffic in this phase.
 
 ## What the command proves
