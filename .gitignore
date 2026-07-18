@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Runtime state and evidence
+*.db
+*.sqlite
+*.sqlite3
+.sentinelforge/
+artifacts/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
