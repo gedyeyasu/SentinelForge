@@ -74,20 +74,135 @@ def create_app(
 
     @app.get("/api/integrations")
     def integrations() -> dict[str, dict[str, object]]:
+        from sentinelforge.config import resolve_vllm_config
+        from sentinelforge.integrations.openshell import get_policy
+
         nvidia = resolve_nvidia_config()
+        vllm_cfg = resolve_vllm_config()
+        # vLLM health quick check (no network call if not configured, just config)
+        vllm_status = "awaiting_host"
+        if os.environ.get("VLLM_BASE_URL"):
+            try:
+                import httpx as _httpx
+
+                resp = _httpx.Client(timeout=2).get(f"{vllm_cfg.base_url}/models")
+                vllm_status = "active" if resp.status_code == 200 else "awaiting_host"
+            except Exception:
+                vllm_status = "awaiting_host"
+
+        # OpenShell policy existence
+        try:
+            pol = get_policy()
+            openshell_status = "active" if pol else "configured"
+            openshell_detail = {"policy": pol.name, "rules": len(pol.rules)}
+        except Exception:
+            openshell_status = "configured"
+            openshell_detail = {}
+
         return {
-            "deterministic": {"status": "active"},
+            "deterministic": {"status": "active", "detectors": ["fastapi_bola", "django_bola"]},
             "nvidia_nim": {
                 "status": "configured" if nvidia.configured else "awaiting_key",
                 "model": nvidia.model,
+                "base_url": nvidia.base_url,
             },
-            "red_hat_security_data": {"status": "public_api"},
+            "vllm": {
+                "status": vllm_status,
+                "model": vllm_cfg.model,
+                "base_url": vllm_cfg.base_url,
+            },
+            "openshell": {"status": openshell_status, **openshell_detail},
+            "red_hat_security_data": {"status": "public_api", "feeds": ["csaf", "oval"]},
             "hiddenlayer": {
                 "status": (
-                    "configured" if os.environ.get("HIDDENLAYER_API_KEY") else "awaiting_key"
-                )
+                    "configured" if os.environ.get("HIDDENLAYER_API_KEY") else "local_fallback"
+                ),
+                "mode": "api" if os.environ.get("HIDDENLAYER_API_KEY") else "local_pattern",
+            },
+            "github": {
+                "status": "configured" if os.environ.get("GITHUB_TOKEN") else "awaiting_key",
             },
             "pentest_scheduler": {"status": "active"},
+            "brev": {"status": "manifest_exists", "doc": "docs/BREV.md"},
+            "nemoclaw": {
+                "status": "active" if Path("config/agents.yaml").is_file() else "missing",
+                "roster": "config/agents.yaml",
+                "heartbeat": "HEARTBEAT.md",
+            },
+        }
+
+    @app.get("/api/agents")
+    def list_agents() -> dict[str, object]:
+        agents_path = Path("config/agents.yaml")
+        if not agents_path.is_file():
+            # fallback lookups
+            for p in [Path(__file__).parents[2] / "config" / "agents.yaml", Path("config/agents.yaml")]:
+                if p.is_file():
+                    agents_path = p
+                    break
+        if not agents_path.is_file():
+            return {"status": "missing", "agents": [], "message": "config/agents.yaml not found"}
+        try:
+            import yaml
+
+            data = yaml.safe_load(agents_path.read_text(encoding="utf-8"))
+            return {
+                "status": "active",
+                "file": str(agents_path),
+                "schema_version": data.get("schema_version", "0.1"),
+                "orchestrator": data.get("orchestrator", "nemoclaw"),
+                "agents": data.get("agents", {}),
+                "routing": data.get("routing", {}),
+                "spawn_depth_limit": data.get("spawn_depth_limit", 2),
+                "telemetry": data.get("telemetry", {}),
+            }
+        except Exception as exc:
+            return {"status": "error", "error": str(exc), "file": str(agents_path)}
+
+    @app.get("/api/pentest/{run_id}/traces")
+    def list_pentest_traces(run_id: str) -> dict[str, object]:
+        pentest = service.store.get_pentest_run(run_id)
+        if pentest is None:
+            # also check runs table
+            if service.store.get_run(run_id) is None:
+                raise HTTPException(status_code=404, detail="Run not found")
+        traces = service.store.list_agent_traces(run_id)
+        total_input = sum(t.get("input_tokens") or 0 for t in traces)
+        total_output = sum(t.get("output_tokens") or 0 for t in traces)
+        total_cost = sum(t.get("cost_usd") or 0 for t in traces)
+        return {
+            "run_id": run_id,
+            "traces": traces,
+            "summary": {
+                "total_traces": len(traces),
+                "total_input_tokens": total_input,
+                "total_output_tokens": total_output,
+                "total_cost_usd": round(total_cost, 6),
+                "agents_involved": list({t.get("agent_role") for t in traces}),
+            },
+        }
+
+    @app.get("/api/learning/invariants")
+    def list_invariants(limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
+        inv = service.store.list_security_invariants(limit=limit)
+        return {"invariants": inv, "total": len(inv)}
+
+    @app.get("/api/learning/memory/{target_id}")
+    def get_memory(target_id: str) -> dict[str, object]:
+        mem = service.store.get_target_memory(target_id)
+        if mem is None:
+            raise HTTPException(status_code=404, detail="Target memory not found")
+        return {"target_id": target_id, "memory": mem}
+
+    @app.get("/api/heartbeat")
+    def get_heartbeat() -> dict[str, object]:
+        hb_path = Path("HEARTBEAT.md")
+        agents_path = Path("config/agents.yaml")
+        return {
+            "heartbeat_exists": hb_path.is_file(),
+            "agents_exists": agents_path.is_file(),
+            "last_modified": hb_path.stat().st_mtime if hb_path.is_file() else None,
+            "content_preview": hb_path.read_text(encoding="utf-8")[:2000] if hb_path.is_file() else None,
         }
 
     @app.get("/api/intelligence/redhat", response_model=list[RedHatAdvisory])

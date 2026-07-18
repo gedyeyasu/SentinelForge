@@ -1,0 +1,84 @@
+# SentinelForge Scope Example - Copy to scope.yaml and customize
+# This file defines the authorized boundaries for active pentesting per PLAN.md §7.2
+# NEVER target production. Only staging/sandbox explicitly owned.
+
+target:
+  base_url: "http://127.0.0.1:8000"  # Authorized staging base URL - CHANGE ME
+  ownership_verified: false          # Must be true after ownership challenge passes
+  openapi_path: "/openapi.json"      # Optional: OpenAPI discovery endpoint
+  environment: "staging"             # dev | staging | sandbox | local - production is DENIED
+
+allowed_hosts:
+  - "127.0.0.1"
+  - "localhost"
+  # Add your staging hosts explicitly:
+  # - "staging.example.com"
+  # - "*.staging.internal"
+
+allowed_methods:
+  - GET
+  - POST
+  - PUT
+  - PATCH
+  # - DELETE  # Disabled by default, only enable for synthetic records
+
+forbidden_paths:
+  - /admin
+  - /internal
+  - /prod
+  - /.git
+  # Add org-specific forbidden endpoints:
+  # - /billing/webhook
+  # - /third-party/*
+
+# Rate and budget controls
+max_requests_per_second: 3
+max_total_requests: 300
+max_routes: 50  # 0 = no limit (full mode)
+
+# Destructive controls - NEVER enable in hackathon, keep false
+allow_destructive_payloads: false
+allow_denial_of_service: false
+allow_persistence: false
+allow_data_exfiltration: false
+
+# Synthetic test identities for cross-tenant BOLA
+# These must be isolated test accounts, never real users
+test_identities:
+  - name: "owner"
+    tenant_id: "tenant-a"
+    headers:
+      x-user-id: "tenant-a-user"
+      # For real staging: Authorization: Bearer ${STAGING_OWNER_TOKEN}
+  - name: "attacker"
+    tenant_id: "tenant-b"
+    headers:
+      x-user-id: "tenant-b-user"
+      # For real staging: Authorization: Bearer ${STAGING_ATTACKER_TOKEN}
+
+# Kill switch - file existence immediately aborts all pending workers
+kill_switch_file: ".sentinelforge/STOP"
+
+# Optional: OpenShell policy path (defaults to config/openshell-policy.yaml)
+openshell_policy_path: "config/openshell-policy.yaml"
+
+# Optional: Deployment environment hints for verification.py
+# Set to true to enforce verification must pass before scanning external target
+require_ownership_verification: true
+require_environment_not_production: true
+
+# Optional: Red Hat advisory cursor config per PLAN.md §9
+advisory_cursor:
+  enabled: true
+  check_interval_seconds: 30
+  sources:
+    - redhat_csaf
+    - redhat_oval
+  dedupe_key: "rhsa_id+package+version"
+
+# Optional: Learning / target memory persistence
+target_memory:
+  enabled: true
+  path: ".sentinelforge/memory"
+  max_runs_to_retain: 100
+  learning_delta_tracking: true

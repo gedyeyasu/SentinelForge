@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 
 DEFAULT_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_NIM_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+DEFAULT_VLLM_BASE_URL = "http://localhost:8000/v1"
+DEFAULT_VLLM_MODEL = "nvidia/nemotron-3-nano-30b-a3b"
 
 _NVIDIA_KEY_NAMES = (
     "NVIDIA_API_KEY",
@@ -24,6 +26,18 @@ class NVIDIAConfig:
     @property
     def configured(self) -> bool:
         return bool(self.api_key)
+
+
+@dataclass(frozen=True)
+class VLLMConfig:
+    api_key: str = field(default="not-needed", repr=False)
+    model: str = DEFAULT_VLLM_MODEL
+    base_url: str = DEFAULT_VLLM_BASE_URL
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.base_url)
+
 
 def resolve_nvidia_config() -> NVIDIAConfig:
     api_key = ""
@@ -47,3 +61,10 @@ def resolve_nvidia_config() -> NVIDIAConfig:
         or DEFAULT_NIM_BASE_URL,
         key_source=key_source,
     )
+
+
+def resolve_vllm_config() -> VLLMConfig:
+    base_url = os.environ.get("VLLM_BASE_URL", DEFAULT_VLLM_BASE_URL).strip() or DEFAULT_VLLM_BASE_URL
+    model = os.environ.get("VLLM_MODEL", DEFAULT_VLLM_MODEL).strip() or DEFAULT_VLLM_MODEL
+    api_key = os.environ.get("VLLM_API_KEY", "not-needed").strip() or "not-needed"
+    return VLLMConfig(api_key=api_key, model=model, base_url=base_url)

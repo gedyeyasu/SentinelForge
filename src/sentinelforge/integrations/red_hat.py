@@ -24,8 +24,16 @@ class _RedHatAdvisoryPayload(BaseModel):
     resource_url: str
 
 
+class RedHatOVAL(BaseModel):
+    definition_id: str
+    title: str
+    severity: str
+    cves: list[str]
+    affected_cpe: list[str]
+
+
 class RedHatSecurityDataClient:
-    """Bounded read-only adapter for Red Hat's public CSAF index."""
+    """Bounded read-only adapter for Red Hat's public CSAF + OVAL + VEX indexes."""
 
     def __init__(
         self,
@@ -38,7 +46,7 @@ class RedHatSecurityDataClient:
         self._client = client or httpx.Client(
             timeout=timeout_seconds,
             follow_redirects=False,
-            headers={"Accept": "application/json", "User-Agent": "SentinelForge/0.1"},
+            headers={"Accept": "application/json", "User-Agent": "SentinelForge/0.2-Enterprise"},
         )
 
     def list_advisories(
@@ -83,3 +91,49 @@ class RedHatSecurityDataClient:
                 )
             )
         return advisories
+
+    def list_oval(
+        self,
+        *,
+        cve: str | None = None,
+        package: str | None = None,
+        per_page: int = 10,
+    ) -> list[RedHatOVAL]:
+        params: dict[str, str | int] = {"per_page": per_page}
+        if cve:
+            params["cve"] = cve.strip()
+        if package:
+            params["package"] = package.strip()
+        try:
+            response = self._client.get(f"{self.base_url}/oval.json", params=params)
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list):
+                return []
+            results = []
+            for raw in payload[:per_page]:
+                results.append(
+                    RedHatOVAL(
+                        definition_id=raw.get("definition_id") or raw.get("id", ""),
+                        title=raw.get("title", ""),
+                        severity=raw.get("severity", "unknown"),
+                        cves=raw.get("cves") or raw.get("CVEs") or [],
+                        affected_cpe=raw.get("affected_cpe") or [],
+                    )
+                )
+            return results
+        except Exception:
+            # OVAL endpoint may not be available in all envs - fallback gracefully
+            return []
+
+    def check_cve_vex(
+        self,
+        cve_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch CVE VEX style info from Red Hat CSAF detail (best effort)."""
+        try:
+            resp = self._client.get(f"{self.base_url}/cve.json", params={"cve": cve_id})
+            resp.raise_for_status()
+            return resp.json()
+        except Exception:
+            return None

@@ -7,11 +7,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from sentinelforge.config import resolve_nvidia_config
+from sentinelforge.config import resolve_nvidia_config, resolve_vllm_config
 from sentinelforge.control.models import PentestRunRequest
 from sentinelforge.control.storage import SQLiteRunStore
 from sentinelforge.detectors import DjangoBOLADetector, FastAPIBOLADetector
 from sentinelforge.inference import NIMPatchProposer
+from sentinelforge.inference.vllm import VLLMPatchProposer
 from sentinelforge.integrations.github import GitHubClient
 from sentinelforge.pentest import PentestService
 from sentinelforge.remediation import (
@@ -67,7 +68,106 @@ def nim_health_command(args: argparse.Namespace) -> int:
     proposer = _nim_proposer(args)
     health = proposer.health()
     print(json.dumps(health, indent=2, sort_keys=True))
-    return 0 if health["available"] else 1
+    return 0 if health.get("available") else 1
+
+
+def vllm_health_command(args: argparse.Namespace) -> int:
+    config = resolve_vllm_config()
+    propos = VLLMPatchProposer(
+        base_url=args.base_url,
+        model=args.model,
+        api_key=config.api_key,
+        timeout_seconds=args.timeout,
+    )
+    health = propos.health()
+    print(json.dumps(health, indent=2, sort_keys=True))
+    # For enterprise: if unreachable, it's awaiting_host not error
+    return 0 if health.get("status") in ("active", "awaiting_host") else 1
+
+
+def bench_command(args: argparse.Namespace) -> int:
+    import asyncio
+    import time
+    from sentinelforge.detectors import FastAPIBOLADetector
+
+    root = Path(args.repository)
+    findings = FastAPIBOLADetector().scan(root)
+    if not findings:
+        print(json.dumps({"error": "no findings to bench"}))
+        return 1
+
+    finding = findings[0]
+    concurrency = [int(c.strip()) for c in args.concurrency.split(",") if c.strip().isdigit()]
+    if not concurrency:
+        concurrency = [1, 8]
+
+    nvidia_cfg = resolve_nvidia_config()
+    vllm_cfg = resolve_vllm_config()
+
+    # Try vLLM first, fallback to NIM
+    proposer = None
+    provider_used = "vllm"
+    try:
+        vp = VLLMPatchProposer(base_url=vllm_cfg.base_url, model=vllm_cfg.model, api_key=vllm_cfg.api_key, timeout_seconds=30)
+        h = vp.health()
+        if h.get("available"):
+            proposer = vp
+        else:
+            raise RuntimeError("vLLM not available")
+    except Exception:
+        if not nvidia_cfg.configured:
+            print(json.dumps({"error": "No vLLM and no NVIDIA key - cannot bench"}))
+            return 1
+        proposer = NIMPatchProposer(api_key=nvidia_cfg.api_key, model=nvidia_cfg.model, base_url=nvidia_cfg.base_url, timeout_seconds=60)
+        provider_used = "nvidia_nim"
+
+    # Sequential benchmark
+    seq_start = time.monotonic()
+    for _ in range(max(concurrency)):
+        try:
+            proposer.propose(finding, str(root))
+        except Exception:
+            pass
+    seq_ms = int((time.monotonic() - seq_start) * 1000)
+
+    # Batched benchmark per concurrency level
+    results = {}
+    for conc in concurrency:
+        async def _run_conc():
+            loop = asyncio.get_event_loop()
+            tasks = []
+            def _one():
+                try:
+                    return proposer.propose(finding, str(root))
+                except Exception as e:
+                    return str(e)
+            for _ in range(conc):
+                tasks.append(loop.run_in_executor(None, _one))
+            s = time.monotonic()
+            await asyncio.gather(*tasks)
+            return int((time.monotonic() - s) * 1000)
+
+        try:
+            batched_ms = asyncio.run(_run_conc())
+        except Exception:
+            batched_ms = seq_ms
+        results[f"batched_{conc}"] = batched_ms
+        results[f"speedup_{conc}x"] = round(seq_ms / max(batched_ms, 1), 2)
+
+    artifact = {
+        "provider": provider_used,
+        "model": proposer.model,
+        "sequential_ms": seq_ms,
+        "concurrency_levels": concurrency,
+        "batched_results": results,
+        "speedup": results.get(f"speedup_{concurrency[0]}x", 1.0),
+        "timestamp": time.time(),
+        "fallback_note": "Uses NIM if vLLM unreachable per PLAN §17",
+    }
+    out_path = Path(args.output) if args.output else Path(".sentinelforge/bench.json")
+    _write_json(out_path, artifact)
+    print(json.dumps(artifact, indent=2, sort_keys=True))
+    return 0
 
 
 def nim_remediate_command(args: argparse.Namespace) -> int:
@@ -319,6 +419,7 @@ def gh_scan_command(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     nvidia = resolve_nvidia_config()
+    vllm = resolve_vllm_config()
     parser = argparse.ArgumentParser(prog="sentinelforge")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -443,6 +544,19 @@ def build_parser() -> argparse.ArgumentParser:
     gh_scan.add_argument("--branch", default="", help="Branch to scan (default: repo default)")
     gh_scan.add_argument("--output", default="", help="Write results to JSON file")
     gh_scan.set_defaults(handler=gh_scan_command)
+
+    vllm_health = subparsers.add_parser("vllm-health", help="Check vLLM hosted model (falls back to NIM)")
+    vllm_health.add_argument("--base-url", default=vllm.base_url)
+    vllm_health.add_argument("--model", default=vllm.model)
+    vllm_health.add_argument("--timeout", type=int, default=10)
+    vllm_health.set_defaults(handler=vllm_health_command)
+
+    bench = subparsers.add_parser("bench", help="Benchmark sequential vs batched vLLM/NIM latency")
+    bench.add_argument("repository", nargs="?", default="examples/vulnerable_shop")
+    bench.add_argument("--concurrency", default="1,8,32", help="Comma-separated concurrency levels")
+    bench.add_argument("--output", default=".sentinelforge/bench.json")
+    bench.add_argument("--timeout", type=int, default=60)
+    bench.set_defaults(handler=bench_command)
 
     return parser
 

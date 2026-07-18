@@ -1,0 +1,223 @@
+schema_version: "0.2.0"
+project: SentinelForge
+description: Persistent orchestrator roster for proof-carrying release gate. Only main spawns workers. No agent can merge PRs.
+orchestrator: nemoclaw
+policy_enforcer: openshell
+inference_provider: nvidia_nim
+spawn_depth_limit: 2
+no_agent_can_merge_pr: true
+allow_destructive_payloads: false
+allow_denial_of_service: false
+allow_persistence: false
+allow_data_exfiltration: false
+
+agents:
+  main:
+    description: Entry point that normalizes triggers, validates scope contract, drives run lifecycle
+    inputs:
+      - trigger
+      - scope
+      - policy
+      - run_state
+    allowed_tools:
+      - read
+      - delegate
+      - status_writes
+    output: run_orchestration
+    model: nvidia/nemotron-3-super-120b-a12b
+    max_tokens: 4096
+    spawn_allowed: true
+    can_write_repo: false
+
+  surface_mapper:
+    description: Maps changed attack surface via git diff, OpenAPI, SBOM, and AST scanners
+    inputs:
+      - git_diff
+      - routes
+      - openapi
+      - sbom
+    allowed_tools:
+      - read_only_repo
+      - openapi_discovery
+      - ast_scanner
+    output: attack_surface_map
+    model: nvidia/nemotron-3-nano-30b-a3b
+    max_tokens: 2048
+    spawn_allowed: false
+    can_write_repo: false
+
+  auth_attacker:
+    description: Cross-tenant BOLA exploitation with ID enumeration, JWT tampering, header injection
+    inputs:
+      - endpoints
+      - test_identities
+      - ownership_rules
+    allowed_tools:
+      - scoped_http_client
+    output: auth_attack_attempts
+    model: nvidia/nemotron-3-nano-30b-a3b
+    max_tokens: 2048
+    spawn_allowed: false
+    can_write_repo: false
+    budget:
+      max_requests_per_second: 3
+      max_total_requests: 100
+
+  injection_attacker:
+    description: LLM-driven payload synthesis for injection (prompt, SQLi, XSS, SSRF, traversal)
+    inputs:
+      - input_endpoints
+      - route_source
+      - framework_type
+      - prior_payload_effectiveness
+    allowed_tools:
+      - scoped_http_client
+      - payload_synthesizer
+    output: injection_attack_attempts
+    model: nvidia/nemotron-3-nano-30b-a3b
+    max_tokens: 8192
+    spawn_allowed: false
+    can_write_repo: false
+    budget:
+      max_requests_per_second: 3
+      max_total_requests: 150
+
+  logic_attacker:
+    description: Business workflow abuse via multi-step sequences, rate-limit bypass, state mutation
+    inputs:
+      - workflow_graph
+      - state_machine
+      - business_rules
+    allowed_tools:
+      - scoped_http_client
+      - workflow_analyzer
+    output: business_logic_abuse_attempts
+    model: nvidia/nemotron-3-super-120b-a12b
+    max_tokens: 4096
+    spawn_allowed: false
+    can_write_repo: false
+
+  dependency_hunter:
+    description: Reachability analysis of Red Hat CVE/CSAF/OVAL against SBOM with call-graph
+    inputs:
+      - sbom
+      - advisories
+      - repository_manifest
+    allowed_tools:
+      - red_hat_api
+      - repo_read
+      - sbom_parser
+      - call_graph_analyzer
+    output: reachability_hypothesis
+    model: nvidia/nemotron-3-nano-30b-a3b
+    max_tokens: 3072
+    spawn_allowed: false
+    can_write_repo: false
+
+  finding_validator:
+    description: Replays exploit receipt in sandbox, confirms reproducibility, rejects false positives
+    inputs:
+      - candidate_evidence
+      - replay_command
+      - expected_invariant
+    allowed_tools:
+      - replay_runner
+      - hiddenlayer_check
+    output: confirmed_or_rejected_finding
+    model: nvidia/nemotron-3-nano-30b-a3b
+    max_tokens: 2048
+    spawn_allowed: false
+    can_write_repo: false
+
+  patch_engineer:
+    description: Generates minimal competing patches via deterministic baseline + Nemotron via NIM/vLLM
+    inputs:
+      - confirmed_finding
+      - repository_snapshot
+      - existing_tests
+    allowed_tools:
+      - worktree_write
+      - test_runner
+      - nim_proposer
+      - vllm_proposer
+    output: patch_candidate_plus_regression_test
+    model: nvidia/nemotron-3-super-120b-a12b
+    max_tokens: 6144
+    spawn_allowed: false
+    can_write_repo: true
+    write_scope:
+      - finding_path
+      - tests/test_security_*.py
+      - max_files_changed: 3
+      - max_lines_changed: 100
+      - max_bytes_per_file: 102400
+
+  adversarial_verifier:
+    description: Mutates successful exploits (3+ safe mutations) and reruns against patched artifact
+    inputs:
+      - patch_candidates
+      - original_receipt
+      - mutation_strategies
+    allowed_tools:
+      - test_runner
+      - scoped_attack_mutated
+      - payload_mutator
+    output: ranked_validation_results_with_rejection_reasons
+    model: nvidia/nemotron-3-nano-30b-a3b
+    max_tokens: 3072
+    spawn_allowed: false
+    can_write_repo: false
+
+  release_auditor:
+    description: Produces signed JSON attestation, PR body, residual risk disclosure, compliance mapping
+    inputs:
+      - complete_event_log
+      - phase_results
+      - threat_assessment
+      - advisory_deltas
+    allowed_tools:
+      - read_only
+      - attestation_signer
+      - sarif_generator
+    output: signed_attestation_plus_pr_artifact
+    model: nvidia/nemotron-3-super-120b-a12b
+    max_tokens: 4096
+    spawn_allowed: false
+    can_write_repo: false
+
+routing:
+  phases:
+    - init
+    - ownership
+    - environment
+    - scoping
+    - mapping
+    - dependency_scan
+    - pattern_scan
+    - auth_attack
+    - injection_attack
+    - hiddenlayer_scan
+    - openshell_audit
+    - nim_analysis
+    - attestation
+    - complete
+
+telemetry:
+  required_per_agent:
+    - run_id
+    - agent_role
+    - model
+    - provider
+    - prompt_template_version
+    - input_tokens
+    - output_tokens
+    - latency_ms
+    - retry_count
+    - hiddenlayer_input_verdict
+    - hiddenlayer_output_verdict
+    - tool_call_parse_success
+  cost_tracking:
+    enabled: true
+    pricing_per_1k_tokens: 0.002
+    meter_to_supabase: false
+    log_file: .sentinelforge/cost.jsonl

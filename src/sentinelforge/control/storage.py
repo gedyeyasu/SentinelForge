@@ -90,6 +90,64 @@ class SQLiteRunStore:
                     next_run_at TEXT NOT NULL,
                     metadata_json TEXT DEFAULT '{}'
                 );
+
+                CREATE TABLE IF NOT EXISTS security_invariants (
+                    id TEXT PRIMARY KEY,
+                    invariant TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    rule_id TEXT NOT NULL,
+                    first_seen TEXT NOT NULL,
+                    last_seen TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 1,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    metadata_json TEXT DEFAULT '{}'
+                );
+
+                CREATE TABLE IF NOT EXISTS target_memory (
+                    target_id TEXT PRIMARY KEY,
+                    base_url TEXT NOT NULL,
+                    endpoint_map_json TEXT NOT NULL DEFAULT '[]',
+                    role_graph_json TEXT NOT NULL DEFAULT '{}',
+                    login_workflow_json TEXT NOT NULL DEFAULT '{}',
+                    prior_attacks_json TEXT NOT NULL DEFAULT '[]',
+                    successful_payloads_json TEXT NOT NULL DEFAULT '[]',
+                    updated_at TEXT NOT NULL,
+                    run_count INTEGER NOT NULL DEFAULT 1,
+                    learning_delta_json TEXT DEFAULT '{}'
+                );
+
+                CREATE TABLE IF NOT EXISTS advisory_cursor (
+                    id TEXT PRIMARY KEY,
+                    last_timestamp TEXT NOT NULL,
+                    dedup_key TEXT NOT NULL,
+                    advisory_count INTEGER NOT NULL DEFAULT 0,
+                    source TEXT NOT NULL DEFAULT 'redhat_csaf',
+                    payload_json TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS agent_traces (
+                    trace_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    agent_role TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    prompt_template_version TEXT NOT NULL,
+                    input_tokens INTEGER,
+                    output_tokens INTEGER,
+                    latency_ms INTEGER,
+                    retry_count INTEGER DEFAULT 0,
+                    hiddenlayer_input_verdict TEXT,
+                    hiddenlayer_output_verdict TEXT,
+                    tool_call_parse_success INTEGER DEFAULT 1,
+                    cost_usd REAL,
+                    created_at TEXT NOT NULL,
+                    payload_json TEXT DEFAULT '{}'
+                );
+
+                CREATE INDEX IF NOT EXISTS traces_run_idx ON agent_traces(run_id);
+                CREATE INDEX IF NOT EXISTS traces_role_idx ON agent_traces(agent_role);
                 """
             )
 
@@ -451,3 +509,184 @@ class SQLiteRunStore:
             next_run_at=str(row["next_run_at"]),
             metadata=json.loads(str(row["metadata_json"])) if row["metadata_json"] else {},
         )
+
+    # --- Enterprise learning tables ---
+
+    def upsert_security_invariant(
+        self,
+        invariant_id: str,
+        invariant: str,
+        file_path: str,
+        rule_id: str,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        now = utc_now()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT count FROM security_invariants WHERE id = ?", (invariant_id,)
+            ).fetchone()
+            if row:
+                connection.execute(
+                    "UPDATE security_invariants SET last_seen = ?, count = count + 1, metadata_json = ? WHERE id = ?",
+                    (now, json.dumps(metadata or {}, sort_keys=True), invariant_id),
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO security_invariants (id, invariant, file_path, rule_id, first_seen, last_seen, count, status, metadata_json) VALUES (?, ?, ?, ?, ?, ?, 1, 'active', ?)",
+                    (invariant_id, invariant, file_path, rule_id, now, now, json.dumps(metadata or {}, sort_keys=True)),
+                )
+
+    def list_security_invariants(self, limit: int = 100) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM security_invariants ORDER BY last_seen DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def upsert_target_memory(
+        self,
+        target_id: str,
+        base_url: str,
+        endpoint_map: list[dict[str, object]],
+        role_graph: dict[str, object],
+        prior_attacks: list[dict[str, object]],
+        learning_delta: dict[str, object] | None = None,
+    ) -> None:
+        now = utc_now()
+        with self._connect() as connection:
+            existing = connection.execute(
+                "SELECT run_count FROM target_memory WHERE target_id = ?", (target_id,)
+            ).fetchone()
+            if existing:
+                connection.execute(
+                    "UPDATE target_memory SET endpoint_map_json = ?, role_graph_json = ?, prior_attacks_json = ?, learning_delta_json = ?, updated_at = ?, run_count = run_count + 1 WHERE target_id = ?",
+                    (
+                        json.dumps(endpoint_map, sort_keys=True),
+                        json.dumps(role_graph, sort_keys=True),
+                        json.dumps(prior_attacks, sort_keys=True),
+                        json.dumps(learning_delta or {}, sort_keys=True),
+                        now,
+                        target_id,
+                    ),
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO target_memory (target_id, base_url, endpoint_map_json, role_graph_json, login_workflow_json, prior_attacks_json, successful_payloads_json, updated_at, run_count, learning_delta_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                    (
+                        target_id,
+                        base_url,
+                        json.dumps(endpoint_map, sort_keys=True),
+                        json.dumps(role_graph, sort_keys=True),
+                        json.dumps({}, sort_keys=True),
+                        json.dumps(prior_attacks, sort_keys=True),
+                        json.dumps([], sort_keys=True),
+                        now,
+                        json.dumps(learning_delta or {}, sort_keys=True),
+                    ),
+                )
+
+    def get_target_memory(self, target_id: str) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM target_memory WHERE target_id = ?", (target_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def upsert_advisory_cursor(
+        self,
+        cursor_id: str,
+        last_timestamp: str,
+        dedup_key: str,
+        advisory_count: int,
+        source: str = "redhat_csaf",
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        now = utc_now()
+        with self._connect() as connection:
+            existing = connection.execute("SELECT id FROM advisory_cursor WHERE id = ?", (cursor_id,)).fetchone()
+            if existing:
+                connection.execute(
+                    "UPDATE advisory_cursor SET last_timestamp = ?, dedup_key = ?, advisory_count = ?, payload_json = ?, updated_at = ? WHERE id = ?",
+                    (
+                        last_timestamp,
+                        dedup_key,
+                        advisory_count,
+                        json.dumps(payload or {}, sort_keys=True),
+                        now,
+                        cursor_id,
+                    ),
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO advisory_cursor (id, last_timestamp, dedup_key, advisory_count, source, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        cursor_id,
+                        last_timestamp,
+                        dedup_key,
+                        advisory_count,
+                        source,
+                        json.dumps(payload or {}, sort_keys=True),
+                        now,
+                        now,
+                    ),
+                )
+
+    def get_advisory_cursor(self, cursor_id: str) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM advisory_cursor WHERE id = ?", (cursor_id,)).fetchone()
+        return dict(row) if row else None
+
+    def append_agent_trace(
+        self,
+        trace_id: str,
+        run_id: str,
+        agent_role: str,
+        model: str,
+        provider: str,
+        prompt_template_version: str = "v1",
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        latency_ms: int | None = None,
+        retry_count: int = 0,
+        hiddenlayer_input_verdict: str | None = None,
+        hiddenlayer_output_verdict: str | None = None,
+        tool_call_parse_success: bool = True,
+        cost_usd: float | None = None,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        import uuid as _uuid
+
+        if not trace_id:
+            trace_id = _uuid.uuid4().hex
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO agent_traces (trace_id, run_id, agent_role, model, provider, prompt_template_version, input_tokens, output_tokens, latency_ms, retry_count, hiddenlayer_input_verdict, hiddenlayer_output_verdict, tool_call_parse_success, cost_usd, created_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    trace_id,
+                    run_id,
+                    agent_role,
+                    model,
+                    provider,
+                    prompt_template_version,
+                    input_tokens,
+                    output_tokens,
+                    latency_ms,
+                    retry_count,
+                    hiddenlayer_input_verdict,
+                    hiddenlayer_output_verdict,
+                    1 if tool_call_parse_success else 0,
+                    cost_usd,
+                    now,
+                    json.dumps(payload or {}, sort_keys=True),
+                ),
+            )
+
+    def list_agent_traces(self, run_id: str) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM agent_traces WHERE run_id = ? ORDER BY created_at", (run_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]

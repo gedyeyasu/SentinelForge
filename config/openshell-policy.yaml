@@ -1,0 +1,135 @@
+name: SentinelForge Attack Sandbox Policy
+version: 0.2.0
+description: |
+  Default deny-by-default policy for SentinelForge attack agents.
+  Enforces network containment to localhost/staging only, blocks destructive
+  filesystem operations, privilege escalation, scanning tools, and exfiltration.
+  Provides audit logging for demo evidence of blocked out-of-scope actions.
+target_environments:
+  - staging
+  - local
+  - sandbox
+default_action: deny
+max_execution_time_seconds: 300
+allow_network: false
+allow_file_write: false
+allow_subprocess: false
+allowed_hosts:
+  - 127.0.0.1
+  - localhost
+  - 0.0.0.0
+forbidden_paths:
+  - /etc
+  - /var
+  - /usr
+  - /bin
+  - /boot
+  - /sys
+  - /admin
+  - /internal
+  - /prod
+  - /.git
+  - /root
+rules:
+  - action: deny
+    description: Block production host access
+    match: 'http[s]?://(?!127\.0\.0\.1|localhost|0\.0\.0\.0)(?!.*\.staging\.internal).*'
+    category: network
+    severity: critical
+    remediation: Use only allowed_hosts from scope.yaml (127.0.0.1, localhost)
+
+  - action: deny
+    description: Block private network access beyond sandbox
+    match: 'http[s]?://(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|169\.254\.|0\.0\.0\.0)'
+    category: network
+    severity: critical
+    remediation: Private ranges blocked unless explicitly allowed in scope.yaml
+
+  - action: deny
+    description: Block destructive file operations
+    match: 'file:write\s+/(etc|var|usr|bin|boot|sys|root|tmp/.*\.\.)'
+    category: filesystem
+    severity: critical
+    remediation: Isolated worktree only - edits limited to finding_path and tests/
+
+  - action: deny
+    description: Block path traversal beyond project
+    match: '\.\./\.\./|/etc/passwd|/etc/shadow|/proc/self'
+    category: filesystem
+    severity: critical
+
+  - action: deny
+    description: Block privilege escalation commands
+    match: 'subprocess:.*\b(sudo|su -|chmod 777|chown root|passwd|visudo|usermod)\b'
+    category: process
+    severity: critical
+
+  - action: deny
+    description: Block network scanning tools
+    match: 'subprocess:.*\b(nmap|masscan|zmap|nikto|sqlmap|hydra|john|hashcat)\b'
+    category: process
+    severity: high
+    remediation: Use bounded HTTP client with rate limit, no scanning tools
+
+  - action: deny
+    description: Block data exfiltration patterns
+    match: '(curl|wget|nc|netcat|scp|rsync).*\b(pastebin|ngrok|burpcollaborator|oastify|webhook\.site|requestbin)\b'
+    category: exfiltration
+    severity: critical
+
+  - action: deny
+    description: Block reverse shells
+    match: '(bash -i|/bin/bash.*-i|nc -e|ncat -e|/bin/sh.*>&|mkfifo.*sh)'
+    category: exfiltration
+    severity: critical
+
+  - action: deny
+    description: Block denial of service payloads
+    match: 'http:.*(slowloris|/dev/urandom|1000000|a{1000,})'
+    category: dos
+    severity: high
+
+  - action: allow
+    description: Allow local staging requests
+    match: 'http[s]?://(127\.0\.0\.1|localhost|0\.0\.0\.0)(:\d+)?(/.*)?$'
+    category: network
+    severity: info
+
+  - action: allow
+    description: Allow reads in project directory
+    match: 'file:read\s+(src/|tests/|examples/|config/|fixtures/)'
+    category: filesystem
+    severity: info
+
+  - action: allow
+    description: Allow writes in isolated worktree
+    match: 'file:write\s+\.sentinelforge/.*/patched/(app/|tests/test_security_)'
+    category: filesystem
+    severity: info
+
+  - action: allow
+    description: Allow safe pytest execution
+    match: 'subprocess:\s*(python|pytest|pip).*\s+tests/'
+    category: process
+    severity: info
+
+audit:
+  log_all_denied: true
+  log_allowed_network: false
+  max_log_entries: 1000
+  persist_to: .sentinelforge/openshell_audit.jsonl
+  include_in_attestation: true
+
+telemetry:
+  track_denied_actions: true
+  dashboard_highlight_denied: true
+  metric_name: openshell_denied_total
+
+integration:
+  enforcement_points:
+    - http_client: src/sentinelforge/agents/http.py ScopedHTTPClient
+    - file_ops: src/sentinelforge/remediation/candidates.py
+    - subprocess: src/sentinelforge/verification.py
+  health_check:
+    endpoint: /api/integrations
+    status_field: openshell

@@ -220,8 +220,11 @@ def test_dashboard_and_static_assets_are_served(tmp_path: Path, monkeypatch) -> 
     assert script.status_code == 200
     assert "function renderRun" in script.text
     assert integrations.status_code == 200
-    assert integrations.json()["nvidia_nim"] == {
-        "status": "configured",
-        "model": "nvidia/test-nemotron",
-    }
+    nim_info = integrations.json()["nvidia_nim"]
+    assert nim_info["status"] == "configured"
+    assert nim_info["model"] == "nvidia/test-nemotron"
+    # Enterprise enhancements: base_url present, vllm, openshell, etc
+    assert "vllm" in integrations.json()
+    assert "openshell" in integrations.json()
+    assert "nemoclaw" in integrations.json()
     assert "never-render-this-test-key" not in integrations.text

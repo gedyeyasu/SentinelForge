@@ -145,7 +145,7 @@ def load_policy(path: Path) -> OpenShellPolicy:
             PolicyRule(
                 action=action,
                 description=rule_raw.get("description", f"Rule {i}"),
-                match_pattern=rule_raw.get("match", ""),
+                match_pattern=rule_raw.get("match", rule_raw.get("match_pattern", "")),
                 category=rule_raw.get("category", "general"),
             )
         )
@@ -172,6 +172,28 @@ def load_policy(path: Path) -> OpenShellPolicy:
         allow_file_write=raw.get("allow_file_write", False),
         allow_subprocess=raw.get("allow_subprocess", False),
     )
+
+
+def get_policy() -> OpenShellPolicy:
+    import os
+
+    env_path = os.environ.get("OPENSHELL_POLICY_PATH", "").strip()
+    candidates = []
+    if env_path:
+        candidates.append(Path(env_path))
+    candidates.extend(
+        [
+            Path("config/openshell-policy.yaml"),
+            Path(__file__).parent.parent.parent.parent / "config" / "openshell-policy.yaml",
+        ]
+    )
+    for p in candidates:
+        try:
+            if p.is_file():
+                return load_policy(p)
+        except Exception:
+            continue
+    return DEFAULT_POLICY
 
 
 DEFAULT_POLICY = OpenShellPolicy(
