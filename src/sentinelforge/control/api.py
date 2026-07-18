@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+import time
 from pathlib import Path
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from sentinelforge.agents.dependencies import DependencyParser
@@ -16,6 +19,7 @@ from sentinelforge.config import resolve_nvidia_config
 from sentinelforge.control.models import (
     CICDRequest,
     DetectionRunRequest,
+    EnvironmentDetectRequest,
     GitHubScanRequest,
     OwnershipRequest,
     OwnershipVerifyRequest,
@@ -25,10 +29,13 @@ from sentinelforge.control.models import (
     RunEvent,
     RunRecord,
     ScanRequest,
+    VerifyCheckRequest,
+    VerifyStartRequest,
 )
 from sentinelforge.control.service import DetectionRunService, RepositoryNotAuthorizedError
 from sentinelforge.control.storage import SQLiteRunStore
 from sentinelforge.detectors import DjangoBOLADetector, FastAPIBOLADetector
+from sentinelforge.environment import EnvironmentDetector
 from sentinelforge.integrations import RedHatAdvisory, RedHatSecurityDataClient
 from sentinelforge.integrations.github import GitHubClient
 from sentinelforge.ownership import OwnershipProver
@@ -37,6 +44,7 @@ from sentinelforge.pentest_modes import list_modes
 from sentinelforge.pr_generator import PRGenerator
 from sentinelforge.scheduler import PentestScheduler
 from sentinelforge.scope import ScopeValidationError, load_scope
+from sentinelforge.verification import OwnershipVerificationService, VerificationMethod
 
 
 def create_app(
@@ -134,10 +142,10 @@ def create_app(
         except ScopeValidationError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         try:
-            result = pentest_service.create_and_execute(request, scope=scope)
+            run_id = pentest_service.create_and_start(request, scope=scope)
         except Exception as error:
             raise HTTPException(status_code=500, detail=str(error)) from error
-        return result
+        return {"run_id": run_id, "status": "started"}
 
     @app.get("/api/pentest")
     def list_pentest_runs(
@@ -173,6 +181,48 @@ def create_app(
         if service.store.get_pentest_run(run_id) is None:
             raise HTTPException(status_code=404, detail="Pentest run not found")
         return service.store.list_events(run_id, after=after)
+
+    @app.get("/api/pentest/{run_id}/stream")
+    async def stream_pentest_events(run_id: str):
+        from sentinelforge.event_bus import EventBus
+
+        if service.store.get_pentest_run(run_id) is None:
+            raise HTTPException(status_code=404, detail="Pentest run not found")
+
+        bus = EventBus.instance()
+        queue = bus.subscribe(run_id)
+
+        async def event_generator():
+            try:
+                while True:
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    except TimeoutError:
+                        yield f": keepalive {time.time()}\n\n"
+                        continue
+                    if event is None:
+                        break
+                    data = json.dumps({
+                        "phase": event.phase,
+                        "kind": event.kind,
+                        "timestamp": event.timestamp,
+                        "payload": event.payload,
+                    })
+                    yield f"data: {data}\n\n"
+                    if event.kind == "run_completed":
+                        break
+            finally:
+                bus.unsubscribe(run_id, queue)
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.post("/api/pentest/schedule")
     def create_pentest_schedule(
@@ -256,20 +306,22 @@ def create_app(
         pattern_result = ExploitPatternScanner().scan_project(repo_path)
 
         dep_vulns = []
+        dep_warnings = []
         try:
             parser = DependencyParser()
             manifest = parser.parse_project(repo_path)
             scanner = DependencyVulnerabilityScanner()
             scan_result = scanner.scan(manifest, repository_root=str(repo_path))
             dep_vulns = [v.to_dict() for v in scan_result.vulnerabilities]
-        except Exception:
-            pass
+        except Exception as error:
+            dep_warnings.append(f"Dependency scan skipped: {error}")
 
         return {
             "repository": str(repo_path),
             "bola_findings": [item.to_dict() for item in findings],
             "pattern_findings": pattern_result.to_dict(),
             "dependency_vulnerabilities": dep_vulns,
+            "warnings": dep_warnings,
             "summary": {
                 "bola_count": len(findings),
                 "pattern_count": len(pattern_result.findings),
@@ -307,14 +359,15 @@ def create_app(
         pattern_result = ExploitPatternScanner().scan(repo_dir)
 
         dep_vulns = []
+        dep_warnings = []
         try:
             parser = DependencyParser()
             manifest = parser.parse_project(repo_dir)
             scanner = DependencyVulnerabilityScanner()
             scan_result = scanner.scan(manifest, repository_root=str(repo_dir))
             dep_vulns = [v.to_dict() for v in scan_result.vulnerabilities]
-        except Exception:
-            pass
+        except Exception as error:
+            dep_warnings.append(f"Dependency scan skipped: {error}")
 
         return {
             "repository": str(repo_dir),
@@ -322,6 +375,7 @@ def create_app(
             "bola_findings": [item.to_dict() for item in findings],
             "pattern_findings": pattern_result.to_dict(),
             "dependency_vulnerabilities": dep_vulns,
+            "warnings": dep_warnings,
             "summary": {
                 "bola_count": len(findings),
                 "pattern_count": len(pattern_result.findings),
@@ -414,6 +468,66 @@ def create_app(
                 detail=f"Unknown challenge type: {request.challenge_type}",
             )
         return {"verified": verified, "challenge_type": request.challenge_type}
+
+    # --- Enterprise Ownership Verification ---
+
+    _verification_service = OwnershipVerificationService()
+
+    @app.post("/api/verify/start")
+    def verify_start(request: VerifyStartRequest) -> dict[str, object]:
+        try:
+            method = VerificationMethod(request.method)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown method: {request.method}. "
+                f"Valid: {', '.join(m.value for m in VerificationMethod)}",
+            ) from None
+
+        challenge = _verification_service.start_verification(
+            request.target, method
+        )
+        return {
+            "challenge_id": challenge.challenge_id,
+            "method": challenge.method.value,
+            "target": challenge.target,
+            "metadata": challenge.metadata,
+            "expires_at": challenge.expires_at,
+        }
+
+    @app.post("/api/verify/check")
+    def verify_check(request: VerifyCheckRequest) -> dict[str, object]:
+        result = _verification_service.check_verification(request.challenge_id)
+        return result.to_dict()
+
+    @app.get("/api/verify/status")
+    def verify_status(target: str = Query(min_length=1)) -> dict[str, object]:
+        verified = _verification_service.is_target_verified(target)
+        challenges = _verification_service.list_challenges(target)
+        return {
+            "target": target,
+            "verified": verified,
+            "challenges": [c.to_dict() for c in challenges],
+        }
+
+    # --- Environment Detection ---
+
+    @app.post("/api/environment/detect")
+    def detect_environment(request: EnvironmentDetectRequest) -> dict[str, object]:
+        detector = EnvironmentDetector()
+        classification = detector.detect(request.url)
+        return classification.to_dict()
+
+    @app.get("/api/environment/scan")
+    def scan_environment_hints(
+        repository: str = Query(min_length=1),
+    ) -> dict[str, object]:
+        repo_path = Path(repository).resolve()
+        if not repo_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"Not a directory: {repo_path}")
+        detector = EnvironmentDetector()
+        hints = detector.scan_codebase_for_env_hints(str(repo_path))
+        return hints
 
     # --- CI/CD Generation ---
 

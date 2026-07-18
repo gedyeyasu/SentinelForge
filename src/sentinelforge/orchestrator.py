@@ -10,6 +10,7 @@ from typing import Any
 
 from sentinelforge.control.models import PentestPhase
 from sentinelforge.control.storage import SQLiteRunStore, utc_now
+from sentinelforge.event_bus import EventBus, LiveEvent
 from sentinelforge.pentest_modes import ModeConfig, PentestMode, get_mode_config
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 class Phase(StrEnum):
     INIT = "init"
+    OWNERSHIP_VERIFICATION = "ownership_verification"
+    ENVIRONMENT_CHECK = "environment_check"
     SCOPING = "scoping"
     MAPPING = "mapping"
     DEPENDENCY_SCAN = "dependency_scan"
@@ -32,6 +35,8 @@ class Phase(StrEnum):
 
 PHASE_ORDER: list[Phase] = [
     Phase.INIT,
+    Phase.OWNERSHIP_VERIFICATION,
+    Phase.ENVIRONMENT_CHECK,
     Phase.SCOPING,
     Phase.MAPPING,
     Phase.DEPENDENCY_SCAN,
@@ -47,6 +52,8 @@ PHASE_ORDER: list[Phase] = [
 
 PHASE_TO_PENTEST_PHASE: dict[Phase, PentestPhase] = {
     Phase.INIT: PentestPhase.SCOPING,
+    Phase.OWNERSHIP_VERIFICATION: PentestPhase.SCOPING,
+    Phase.ENVIRONMENT_CHECK: PentestPhase.SCOPING,
     Phase.SCOPING: PentestPhase.SCOPING,
     Phase.MAPPING: PentestPhase.MAPPING,
     Phase.DEPENDENCY_SCAN: PentestPhase.MAPPING,
@@ -58,6 +65,23 @@ PHASE_TO_PENTEST_PHASE: dict[Phase, PentestPhase] = {
     Phase.NIM_ANALYSIS: PentestPhase.ATTACKING,
     Phase.ATTESTATION: PentestPhase.ATTESTED,
     Phase.COMPLETE: PentestPhase.ATTESTED,
+}
+
+_PHASE_NAMES: dict[Phase, str] = {
+    Phase.INIT: "Initializing",
+    Phase.OWNERSHIP_VERIFICATION: "Verifying Ownership",
+    Phase.ENVIRONMENT_CHECK: "Checking Environment",
+    Phase.SCOPING: "Validating Scope",
+    Phase.MAPPING: "Mapping Attack Surface",
+    Phase.DEPENDENCY_SCAN: "Scanning Dependencies",
+    Phase.PATTERN_SCAN: "Scanning for Exploit Patterns",
+    Phase.AUTH_ATTACK: "Running Auth Attacks",
+    Phase.INJECTION_ATTACK: "Running Injection Attacks",
+    Phase.HIDDENLAYER_SCAN: "HiddenLayer AI Scan",
+    Phase.OPENSHELL_AUDIT: "OpenShell Audit",
+    Phase.NIM_ANALYSIS: "NIM Threat Analysis",
+    Phase.ATTESTATION: "Generating Attestation",
+    Phase.COMPLETE: "Complete",
 }
 
 
@@ -100,6 +124,7 @@ class AgentOrchestrator:
         self._config = get_mode_config(mode)
         self._handlers: dict[Phase, PhaseHandler] = {}
         self._running: dict[str, asyncio.Task[None]] = {}
+        self._bus = EventBus.instance()
 
     @property
     def config(self) -> ModeConfig:
@@ -110,7 +135,15 @@ class AgentOrchestrator:
 
     def plan_phases(self) -> list[Phase]:
         config = self._config
-        phases: list[Phase] = [Phase.INIT, Phase.SCOPING, Phase.MAPPING]
+        phases: list[Phase] = [Phase.INIT]
+
+        if config.require_ownership_verification:
+            phases.append(Phase.OWNERSHIP_VERIFICATION)
+        if config.detect_target_environment:
+            phases.append(Phase.ENVIRONMENT_CHECK)
+
+        phases.append(Phase.SCOPING)
+        phases.append(Phase.MAPPING)
 
         if config.run_dependency_scan:
             phases.append(Phase.DEPENDENCY_SCAN)
@@ -168,6 +201,13 @@ class AgentOrchestrator:
             self._store.update_pentest_run(
                 run_id, phase=pentest_phase
             )
+            self._bus.publish(LiveEvent(
+                run_id=run_id,
+                phase=phase.value,
+                kind="phase_started",
+                timestamp=time.time(),
+                payload={"phase": phase.value, "phase_name": _PHASE_NAMES.get(phase, phase.value)},
+            ))
 
             handler = self._handlers.get(phase)
             if handler is None:
@@ -233,6 +273,19 @@ class AgentOrchestrator:
                     "error": result.error,
                 },
             )
+            self._bus.publish(LiveEvent(
+                run_id=run_id,
+                phase=phase.value,
+                kind="phase_completed",
+                timestamp=time.time(),
+                payload={
+                    "phase": phase.value,
+                    "phase_name": _PHASE_NAMES.get(phase, phase.value),
+                    "success": result.success,
+                    "duration_ms": result.duration_ms,
+                    "error": result.error,
+                },
+            ))
 
             if (
                 not result.success

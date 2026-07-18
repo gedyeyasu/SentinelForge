@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any
 
 import httpx
 from pydantic import BaseModel, ValidationError
 from pydantic import Field as PydanticField
+
+logger = logging.getLogger(__name__)
 
 
 class ThreatAssessment(BaseModel):
@@ -196,11 +199,16 @@ class NIMThreatAnalyzer:
                 except (json.JSONDecodeError, ValidationError):
                     pass
             raw_preview = stripped[:200]
+            logger.warning(
+                "NIM response unparseable, using degraded assessment. Latency: %dms",
+                latency_ms,
+            )
             return ThreatAssessment(
-                risk_level="medium",
+                risk_level="unknown",
                 summary=(
-                    f"Unable to parse NIM response. Latency: {latency_ms}ms. "
-                    f"Raw: {raw_preview}"
+                    f"NIM response could not be parsed as structured JSON. "
+                    f"Manual review required. Latency: {latency_ms}ms. "
+                    f"Raw preview: {raw_preview}"
                 ),
                 attack_vectors=["parse_error"],
                 recommendations=["Review raw NIM output"],

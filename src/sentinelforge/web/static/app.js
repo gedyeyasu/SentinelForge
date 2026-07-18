@@ -326,6 +326,69 @@ async function createRun(e) {
 }
 
 // ===== PENTEST =====
+const PHASE_ICONS = {
+  init: "⚡", ownership_verification: "🔑", environment_check: "🌍",
+  scoping: "📋", mapping: "🗺️", dependency_scan: "📦",
+  pattern_scan: "🔍", attacking: "⚔️", nim_analysis: "🤖",
+  attestation: "📝", safety: "🛡️", openshell: "🔒", complete: "✅",
+};
+
+const PHASE_ORDER = [
+  "init", "ownership_verification", "environment_check", "scoping",
+  "mapping", "dependency_scan", "pattern_scan", "attacking",
+  "nim_analysis", "attestation", "complete",
+];
+
+function renderLiveProgressBar(phases, currentPhase) {
+  const bar = document.querySelector("#pentest-progress-bar");
+  if (!bar) return;
+  bar.replaceChildren();
+  const currentIdx = PHASE_ORDER.indexOf(currentPhase);
+  PHASE_ORDER.forEach((phase, i) => {
+    const step = document.createElement("div");
+    step.className = "progress-step";
+    if (i < currentIdx) step.classList.add("done");
+    else if (i === currentIdx) step.classList.add("active");
+    const icon = document.createElement("span");
+    icon.className = "progress-icon";
+    icon.textContent = PHASE_ICONS[phase] || "•";
+    const label = document.createElement("span");
+    label.className = "progress-label";
+    label.textContent = phase.replace(/_/g, " ");
+    step.append(icon, label);
+    bar.append(step);
+    if (i < PHASE_ORDER.length - 1) {
+      const conn = document.createElement("div");
+      conn.className = i < currentIdx ? "progress-connector done" : "progress-connector";
+      bar.append(conn);
+    }
+  });
+}
+
+function appendLiveEvent(event) {
+  const feed = document.querySelector("#pentest-live-feed");
+  if (!feed) return;
+  const item = document.createElement("div");
+  item.className = `live-event live-${event.kind}`;
+  const ts = new Date(event.timestamp * 1000);
+  const time = document.createElement("span");
+  time.className = "live-time";
+  time.textContent = ts.toLocaleTimeString();
+  const phase = document.createElement("span");
+  phase.className = "live-phase";
+  phase.textContent = PHASE_ICONS[event.phase] || "";
+  const msg = document.createElement("span");
+  msg.className = "live-message";
+  msg.textContent = event.payload?.message || event.kind;
+  const badge = document.createElement("span");
+  badge.className = `live-badge badge-${event.kind.split("_").pop()}`;
+  badge.textContent = event.kind;
+  item.append(time, phase, msg, badge);
+  feed.prepend(item);
+  // Keep max 100 events in DOM
+  while (feed.children.length > 100) feed.removeChild(feed.lastChild);
+}
+
 function renderPentestRun(data) {
   const run = data.pentest_run; if (!run) return;
   state.currentPentestRun = run; ui.pentestEmpty.hidden = true; ui.pentestActive.hidden = false;
@@ -335,7 +398,8 @@ function renderPentestRun(data) {
   text(ui.pentestVerdictRef, run.run_id.slice(-8).toUpperCase());
   setVerdict(ui.pentestVerdictPanel, ui.pentestVerdict, ui.pentestVerdictCaption, run.candidate_verdict, "candidate");
   text(ui.pentestPhase, verdictLabel(run.phase));
-  const events = data.events || []; renderEvents(ui.pentestTimeline, events);
+  const events = data.events || [];
+  renderEvents(ui.pentestTimeline, events);
   text(ui.pentestEventCount, `${events.length} EVENT${events.length === 1 ? "" : "S"}`);
   const results = run.results || {};
   if (results.summary || results.routes) {
@@ -347,23 +411,64 @@ function renderPentestRun(data) {
   }
 }
 
+let pentestEventSource = null;
+
+function startPentestStream(runId) {
+  if (pentestEventSource) pentestEventSource.close();
+  const feed = document.querySelector("#pentest-live-feed");
+  if (feed) feed.replaceChildren();
+  renderLiveProgressBar([], "init");
+
+  pentestEventSource = new EventSource(`/api/pentest/${runId}/stream`);
+  pentestEventSource.onmessage = (e) => {
+    try {
+      const event = JSON.parse(e.data);
+      appendLiveEvent(event);
+      if (event.payload?.phase) renderLiveProgressBar([], event.payload.phase);
+      // Update verdict panel on completion
+      if (event.kind === "run_completed") {
+        pentestEventSource.close();
+        pentestEventSource = null;
+        refreshPentestRun(runId);
+      }
+    } catch {}
+  };
+  pentestEventSource.onerror = () => {
+    pentestEventSource.close();
+    pentestEventSource = null;
+  };
+}
+
+async function createPentest(e) {
+  e?.preventDefault(); clearError(ui.pentestError);
+  if (pentestEventSource) { pentestEventSource.close(); pentestEventSource = null; }
+  ui.pentestButton.disabled = true; ui.pentestButton.querySelector("span").textContent = "Starting…";
+  try {
+    const result = await api("/api/pentest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repository: ui.pentestRepository.value.trim(), scope_file: ui.pentestScope.value.trim(), mode: ui.pentestMode.value }) });
+    if (result.run_id) {
+      ui.pentestEmpty.hidden = true; ui.pentestActive.hidden = false;
+      text(ui.pentestRunId, result.run_id.toUpperCase());
+      text(ui.pentestLifecycle, "RUNNING");
+      startPentestStream(result.run_id);
+      loadPentestRuns();
+    }
+  } catch (err) { ui.pentestButton.disabled = false; ui.pentestButton.querySelector("span").textContent = "Start pentest"; showError(ui.pentestError, err.message); }
+}
+
 async function refreshPentestRun(runId) {
   try {
     const data = await api(`/api/pentest/${encodeURIComponent(runId)}`);
     renderPentestRun(data);
     const run = data.pentest_run;
-    if (run && ["queued", "running"].includes(run.status)) state.pentestPollTimer = setTimeout(() => refreshPentestRun(runId), 450);
-    else { ui.pentestButton.disabled = false; ui.pentestButton.querySelector("span").textContent = "Start pentest"; loadPentestRuns(); }
+    if (run && ["queued", "running"].includes(run.status)) {
+      // Still running — SSE will handle live updates, just poll for final state
+      state.pentestPollTimer = setTimeout(() => refreshPentestRun(runId), 2000);
+    } else {
+      ui.pentestButton.disabled = false;
+      ui.pentestButton.querySelector("span").textContent = "Start pentest";
+      loadPentestRuns();
+    }
   } catch (err) { ui.pentestButton.disabled = false; showError(ui.pentestError, err.message); }
-}
-
-async function createPentest(e) {
-  e?.preventDefault(); clearError(ui.pentestError); clearTimeout(state.pentestPollTimer);
-  ui.pentestButton.disabled = true; ui.pentestButton.querySelector("span").textContent = "Starting…";
-  try {
-    const result = await api("/api/pentest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repository: ui.pentestRepository.value.trim(), scope_file: ui.pentestScope.value.trim(), mode: ui.pentestMode.value }) });
-    renderPentestRun(result); if (result.pentest_run) await refreshPentestRun(result.pentest_run.run_id);
-  } catch (err) { ui.pentestButton.disabled = false; ui.pentestButton.querySelector("span").textContent = "Start pentest"; showError(ui.pentestError, err.message); }
 }
 
 async function loadPentestRuns() {

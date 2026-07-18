@@ -248,8 +248,6 @@ class DjangoBOLADetector:
                 if child.args:
                     first_arg = ast.unparse(child.args[0])
                     return first_arg
-            if isinstance(child.value, ast.Call) if hasattr(child, "value") else False:
-                pass
         for child in ast.walk(node):
             if not isinstance(child, ast.Assign):
                 continue

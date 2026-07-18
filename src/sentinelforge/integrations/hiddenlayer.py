@@ -138,6 +138,23 @@ class HiddenLayerClient:
         result = self.scan_prompt(text)
         return result.verdict in (HiddenLayerVerdict.SUSPICIOUS, HiddenLayerVerdict.MALICIOUS)
 
+    def scan_target_environment(self, target_url: str) -> ScanResult:
+        if not self.configured:
+            return ScanResult(
+                verdict=HiddenLayerVerdict.SAFE,
+                score=0.0,
+                details="HiddenLayer not configured; skipped",
+                scanner="hiddenlayer_target_env",
+                latency_ms=0,
+            )
+        return self._scan_with_payload(
+            {
+                "input": target_url,
+                "scan_type": "target_environment",
+            },
+            scanner="hiddenlayer_target_env",
+        )
+
     def _scan_with_payload(self, payload: dict[str, Any], scanner: str) -> ScanResult:
         import time
 

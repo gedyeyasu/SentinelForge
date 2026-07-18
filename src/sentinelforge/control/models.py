@@ -144,3 +144,16 @@ class CICDRequest(BaseModel):
     platform: str = Field(default="github_actions")
     schedule_cron: str = Field(default="0 2 * * 0")
     pentest_mode: str = Field(default="standard")
+
+
+class VerifyStartRequest(BaseModel):
+    target: str = Field(min_length=1)
+    method: str = Field(default="http_endpoint")
+
+
+class VerifyCheckRequest(BaseModel):
+    challenge_id: str = Field(min_length=1)
+
+
+class EnvironmentDetectRequest(BaseModel):
+    url: str = Field(min_length=1)

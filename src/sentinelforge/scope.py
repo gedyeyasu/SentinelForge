@@ -41,6 +41,7 @@ class ScopeConfig:
     allow_denial_of_service: bool = False
     allow_persistence: bool = False
     allow_data_exfiltration: bool = False
+    allow_production: bool = False
     test_identities: tuple[TestIdentity, ...] = ()
     kill_switch_file: str = "/run/sentinelforge/STOP"
 
@@ -165,6 +166,9 @@ def load_scope(path: Path) -> ScopeConfig:
         ),
         allow_data_exfiltration=_require_bool(
             raw.get("allow_data_exfiltration", False), "scope.allow_data_exfiltration"
+        ),
+        allow_production=_require_bool(
+            raw.get("allow_production", False), "scope.allow_production"
         ),
         test_identities=identities,
         kill_switch_file=_require_string(

@@ -1557,3 +1557,206 @@ input:hover {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ===== PENTEST LIVE FEED ===== */
+.pentest-progress-container {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.pentest-progress-container .eyebrow {
+  margin-bottom: 0.75rem;
+}
+
+.pentest-progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow-x: auto;
+  padding: 0.5rem 0;
+}
+
+.progress-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 72px;
+  opacity: 0.35;
+  transition: opacity 0.3s ease;
+}
+
+.progress-step.done {
+  opacity: 0.7;
+}
+
+.progress-step.active {
+  opacity: 1;
+}
+
+.progress-step.active .progress-icon {
+  background: var(--info-soft);
+  border-color: var(--info);
+  color: var(--info);
+  box-shadow: 0 0 12px rgba(85, 182, 255, 0.3);
+}
+
+.progress-step.done .progress-icon {
+  background: var(--safe-soft);
+  border-color: var(--safe);
+  color: var(--safe);
+}
+
+.progress-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--panel-inset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+}
+
+.progress-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  white-space: nowrap;
+  text-align: center;
+}
+
+.progress-connector {
+  flex: 1;
+  height: 2px;
+  background: var(--border);
+  min-width: 16px;
+  transition: background 0.3s ease;
+}
+
+.progress-connector.done {
+  background: var(--safe);
+}
+
+.pentest-live-container {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+  max-height: 320px;
+  overflow: hidden;
+}
+
+.pentest-live-container .eyebrow {
+  margin-bottom: 0.75rem;
+}
+
+.pentest-live-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.live-event {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--canvas-grid);
+  animation: liveFadeIn 0.3s ease;
+  line-height: 1.5;
+}
+
+.live-event:first-child {
+  animation: liveSlideIn 0.3s ease;
+}
+
+@keyframes liveFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes liveSlideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.live-time {
+  color: var(--muted-dim);
+  flex-shrink: 0;
+  font-size: 0.65rem;
+}
+
+.live-phase {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+}
+
+.live-message {
+  color: var(--text-soft);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-badge {
+  flex-shrink: 0;
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: var(--panel-inset);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.badge-started { background: var(--info-soft); color: var(--info); border-color: var(--info); }
+.badge-completed { background: var(--safe-soft); color: var(--safe); border-color: var(--safe); }
+.badge-finding { background: var(--blocked-soft); color: var(--blocked); border-color: var(--blocked); }
+.badge-verdict { background: var(--warning-soft); color: var(--warning); border-color: var(--warning); }
+.badge-completed { background: var(--safe-soft); color: var(--safe); border-color: var(--safe); }
+
+.live-event.live-phase_started {
+  border-left: 3px solid var(--info);
+  padding-left: 0.5rem;
+  background: var(--info-soft);
+}
+
+.live-event.live-phase_completed {
+  border-left: 3px solid var(--safe);
+  padding-left: 0.5rem;
+}
+
+.live-event.live-finding {
+  border-left: 3px solid var(--blocked);
+  padding-left: 0.5rem;
+  background: var(--blocked-soft);
+}
+
+.live-event.live-agent_started {
+  border-left: 3px solid var(--warning);
+  padding-left: 0.5rem;
+}
+
+.live-event.live-run_completed {
+  border-left: 3px solid var(--safe);
+  padding-left: 0.5rem;
+  background: var(--safe-soft);
+  font-weight: 600;
+}

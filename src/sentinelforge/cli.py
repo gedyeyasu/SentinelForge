@@ -289,13 +289,14 @@ def gh_scan_command(args: argparse.Namespace) -> int:
     pattern_result = ExploitPatternScanner().scan_project(repo_dir)
     dep_parser = DependencyParser()
     dep_findings = []
+    dep_warnings = []
     try:
         manifest = dep_parser.parse_project(repo_dir)
         scanner = DependencyVulnerabilityScanner()
         scan_result = scanner.scan(manifest, repository_root=str(repo_dir))
         dep_findings = [v.to_dict() for v in scan_result.vulnerabilities]
-    except Exception:
-        pass
+    except Exception as error:
+        dep_warnings.append(f"Dependency scan skipped: {error}")
 
     payload = {
         "repository": str(repo_dir),
@@ -303,6 +304,7 @@ def gh_scan_command(args: argparse.Namespace) -> int:
         "bola_findings": [item.to_dict() for item in findings],
         "pattern_findings": pattern_result.to_dict(),
         "dependency_vulnerabilities": dep_findings,
+        "warnings": dep_warnings,
         "summary": {
             "bola_count": len(findings),
             "pattern_count": len(pattern_result.findings),

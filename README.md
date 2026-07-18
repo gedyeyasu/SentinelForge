@@ -55,16 +55,19 @@ SentinelForge includes a full multi-agent pentest orchestrator with 6 enterprise
 
 Each pentest run executes these phases sequentially:
 
-1. **Scoping** - Validates target boundaries, allowed hosts, rate limits
-2. **Mapping** - Discovers API routes via OpenAPI + AST-based FastAPI scanner
-3. **Dependency scan** - Cross-references packages against Red Hat Security Data API
-4. **Pattern scan** - Detects 18 code-level exploit patterns (hardcoded secrets, unsafe deserialization, etc.)
-5. **Auth attack** - Cross-tenant BOLA exploitation attempts
-6. **Injection attack** - 10 payloads: prompt injection, SQL injection, XSS, SSRF, path traversal
-7. **HiddenLayer scan** - Prompt injection and model I/O defense scanning
-8. **OpenShell audit** - Policy enforcement verification
-9. **NIM analysis** - NVIDIA Nemotron threat assessment of all findings
-10. **Attestation** - Produces release verdict with evidence hashes
+1. **Init** - Initialize run state
+2. **Ownership verification** - Challenge-response proof (file, DNS, HTTP, API endpoint)
+3. **Environment check** - Detect dev/staging/production via URL, headers, content signals
+4. **Scoping** - Validates target boundaries, allowed hosts, rate limits
+5. **Mapping** - Discovers API routes via OpenAPI + AST-based FastAPI scanner
+6. **Dependency scan** - Cross-references packages against Red Hat Security Data API
+7. **Pattern scan** - Detects 18 code-level exploit patterns (hardcoded secrets, unsafe deserialization, etc.)
+8. **Auth attack** - Cross-tenant BOLA exploitation attempts
+9. **Injection attack** - 10 payloads: prompt injection, SQL injection, XSS, SSRF, path traversal
+10. **HiddenLayer scan** - Prompt injection and model I/O defense scanning
+11. **OpenShell audit** - Policy enforcement verification
+12. **NIM analysis** - NVIDIA Nemotron threat assessment of all findings
+13. **Attestation** - Produces release verdict with evidence hashes
 
 ## NVIDIA Nemotron patch worker
 
@@ -115,6 +118,11 @@ Start the persisted local control plane:
 | `POST` | `/api/github/create-pr` | Generate security fix PR |
 | `POST` | `/api/ownership/challenge` | Create ownership challenge |
 | `POST` | `/api/ownership/verify` | Verify ownership proof |
+| `POST` | `/api/verify/start` | Start enterprise ownership verification |
+| `POST` | `/api/verify/check` | Check ownership verification status |
+| `GET` | `/api/verify/status` | Get verification status for a target |
+| `POST` | `/api/environment/detect` | Detect target deployment environment |
+| `GET` | `/api/environment/scan` | Scan codebase for environment hints |
 | `POST` | `/api/cicd/generate` | Generate CI/CD pipeline |
 | `GET` | `/api/intelligence/redhat` | Query Red Hat advisories |
 
@@ -235,10 +243,14 @@ SentinelForge targets only explicitly authorized staging environments and contro
 - Code-level exploit pattern detection (18 patterns)
 - Prompt injection defense via HiddenLayer
 - Policy enforcement via OpenShell
-- Ownership verification before scanning external targets
+- Enterprise ownership verification (ACME-style challenge-response)
+- Deployment environment detection (dev/staging/production)
+- CVE intelligence ingestion from NVD, KEV, and EPSS feeds
+- Adaptive payload generation with Thompson Sampling
+- Hypothesis-driven zero-day vulnerability exploration
+- Persistent engagement memory across scans
 - Automated PR generation with security patches and evidence
 - CI/CD pipeline generation with built-in security gates
-- Minimal patched artifact with regression tests
 - Release security attestation with evidence hashes
 
 ## Architecture
@@ -258,24 +270,36 @@ sentinelforge/
     django_bola.py  # Django URL pattern + BOLA detection
   integrations/     # External service adapters
     github.py       # GitHub API client (repos, clone)
-    hiddenlayer.py  # Prompt injection scanning
+    hiddenlayer.py  # Prompt injection scanning + environment detection
     openshell.py    # Policy enforcement
     red_hat.py      # Security data API
     supabase.py     # Cloud persistence
+  intelligence/     # Adaptive threat intelligence engine
+    cve_ingestion.py    # NVD/KEV/EPSS feed ingestion
+    threat_learning.py  # Pattern extraction from CVEs and scans
+    adaptive_payloads.py # Thompson Sampling-inspired payload selection
+    engagement_memory.py # Persistent memory across engagements
+    zero_day_hunter.py  # Hypothesis-driven vulnerability exploration
+  monitoring/       # Continuous security monitoring
+    continuous_scanner.py # Scheduled scan management
+    threat_feed.py   # Multi-source threat feed aggregation
   control/          # API and storage
-    api.py          # FastAPI control plane (scan, pentest, GitHub, ownership, CI/CD)
+    api.py          # FastAPI control plane (scan, pentest, GitHub, ownership, verification, environment, CI/CD)
     storage.py      # SQLite event store
     models.py       # Pydantic models
   inference/        # NIM patch proposals
     nvidia_nim.py   # NVIDIA NIM adapter
+  verification.py   # Enterprise ownership verification (ACME-style challenge-response)
+  environment.py    # Deployment environment detection (dev/staging/production)
   web/static/       # Dashboard SPA (5 views: Scan, Release Proof, Pentest, Schedule, Settings)
-  orchestrator.py   # Phase-based agent orchestration
-  pentest.py        # Pentest service
-  pentest_modes.py  # 6 enterprise pentest modes
+  orchestrator.py   # Phase-based agent orchestration (14 phases including ownership + environment)
+  pentest.py        # Pentest service with ownership and environment handlers
+  pentest_modes.py  # 6 enterprise pentest modes with ownership/environment flags
   scheduler.py      # Recurring scan scheduler
   ownership.py      # Ownership proof (file, DNS, HTTP challenges)
   pr_generator.py   # GitHub PR generation with security fixes
   cicd.py           # CI/CD pipeline templates (GitHub Actions, GitLab CI, pre-commit)
+  scope.py          # Scope config with allow_production flag
   cli.py            # Command-line interface
 ```
 

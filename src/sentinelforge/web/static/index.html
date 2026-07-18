@@ -297,10 +297,22 @@
                 <div><span class="lifecycle-pill" id="pentest-lifecycle">QUEUED</span><span class="run-id" id="pentest-run-id">SF_PENTEST_—</span></div>
                 <div class="run-identity-meta"><span id="pentest-repo-label">repository</span><span id="pentest-mode-label">mode — standard</span><span id="pentest-updated">updated —</span></div>
               </div>
+
+              <div class="pentest-progress-container">
+                <p class="eyebrow">AGENT PHASE PROGRESS</p>
+                <div id="pentest-progress-bar" class="pentest-progress-bar"></div>
+              </div>
+
               <div class="verdict-comparison">
                 <article class="verdict-panel candidate" id="pentest-verdict-panel"><header><span>PENTEST VERDICT</span><code id="pentest-verdict-ref">—</code></header><strong class="verdict-value" id="pentest-verdict">PENDING</strong><p id="pentest-verdict-caption">Running adversarial agents.</p></article>
                 <article class="health-panel"><span>PHASE PROGRESS</span><strong id="pentest-phase">INITIALIZING</strong><p id="pentest-phase-detail">Awaiting orchestration start.</p></article>
               </div>
+
+              <div class="pentest-live-container">
+                <p class="eyebrow">LIVE AGENT FEED</p>
+                <div id="pentest-live-feed" class="pentest-live-feed"></div>
+              </div>
+
               <div class="evidence-grid">
                 <article class="panel timeline-panel"><header class="panel-header"><div><p class="eyebrow">PENTEST EVENT LOG</p><h2>Attack timeline</h2></div><span class="event-count" id="pentest-event-count">0 EVENTS</span></header><ol class="timeline" id="pentest-timeline-list"></ol></article>
                 <article class="panel"><header class="panel-header"><div><p class="eyebrow">FINDINGS SUMMARY</p><h2>Attack results</h2></div></header><div id="pentest-results-summary" class="panel-empty">Awaiting results.</div><div id="pentest-results-detail" hidden><dl class="evidence-list"><div><dt>Routes discovered</dt><dd id="pentest-routes-count">—</dd></div><div><dt>Auth attacks</dt><dd id="pentest-auth-count">—</dd></div><div><dt>Injection payloads</dt><dd id="pentest-injection-count">—</dd></div><div><dt>Dependency vulns</dt><dd id="pentest-dep-vuln-count">—</dd></div><div><dt>Pattern findings</dt><dd id="pentest-pattern-count">—</dd></div><div><dt>HL safety scans</dt><dd id="pentest-hl-count">—</dd></div></dl></div></article>
