@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from sentinelforge.integrations.github import GitHubClient
 
 

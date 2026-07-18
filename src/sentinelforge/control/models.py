@@ -109,3 +109,38 @@ class PentestScheduleRecord(BaseModel):
     last_run_at: str | None = None
     next_run_at: str
     metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class ScanRequest(BaseModel):
+    repository: str = Field(min_length=1)
+    scan_type: str = Field(default="full")
+
+
+class GitHubScanRequest(BaseModel):
+    owner: str = Field(min_length=1)
+    repo: str = Field(min_length=1)
+    branch: str = Field(default="")
+
+
+class PRRequest(BaseModel):
+    repository: str = Field(min_length=1)
+    finding: dict = Field(default_factory=dict)
+    branch_name: str = Field(default="")
+
+
+class OwnershipRequest(BaseModel):
+    target_path: str = Field(min_length=1)
+    challenge_type: str = Field(default="file")
+
+
+class OwnershipVerifyRequest(BaseModel):
+    target_path: str = Field(min_length=1)
+    challenge_type: str = Field(default="file")
+    token: str = Field(min_length=1)
+
+
+class CICDRequest(BaseModel):
+    repository: str = Field(min_length=1)
+    platform: str = Field(default="github_actions")
+    schedule_cron: str = Field(default="0 2 * * 0")
+    pentest_mode: str = Field(default="standard")

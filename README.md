@@ -2,7 +2,7 @@
 
 SentinelForge is an autonomous adversarial release gate for teams shipping AI-generated code faster than human security teams can review it.
 
-For every authorized release candidate, it maps the changed attack surface, dispatches bounded red-team agents, validates exploits with replayable evidence, runs NVIDIA Nemotron threat analysis, generates competing patches, attacks the patches again, runs the existing test suite, and produces a release security attestation.
+For every authorized release candidate, it maps the changed attack surface, dispatches bounded red-team agents, validates exploits with replayable evidence, runs NVIDIA Nemotron threat analysis, generates competing patches, attacks the patches again, runs the existing test suite, and produces a release security attestation. It supports both FastAPI and Django backends, integrates with GitHub for repository scanning and PR generation, and can generate CI/CD pipelines with built-in security gates.
 
 Built for the **AITX Community x NVIDIA Claw Agent Hackathon**.
 
@@ -101,6 +101,8 @@ Start the persisted local control plane:
 | `POST` | `/api/runs` | Create detection run |
 | `GET` | `/api/runs/{id}` | Get run status |
 | `GET` | `/api/runs/{id}/events` | Get run events |
+| `POST` | `/api/scan` | Scan a local repository |
+| `POST` | `/api/scan/github` | Scan a GitHub repository |
 | `POST` | `/api/pentest` | Create pentest run |
 | `GET` | `/api/pentest` | List pentest runs |
 | `GET` | `/api/pentest/{id}` | Get pentest run |
@@ -108,10 +110,89 @@ Start the persisted local control plane:
 | `POST` | `/api/pentest/schedule` | Create recurring scan |
 | `GET` | `/api/pentest/schedule` | List schedules |
 | `DELETE` | `/api/pentest/schedule/{id}` | Delete schedule |
+| `GET` | `/api/github/status` | GitHub token health |
+| `GET` | `/api/github/repos` | List GitHub repositories |
+| `POST` | `/api/github/create-pr` | Generate security fix PR |
+| `POST` | `/api/ownership/challenge` | Create ownership challenge |
+| `POST` | `/api/ownership/verify` | Verify ownership proof |
+| `POST` | `/api/cicd/generate` | Generate CI/CD pipeline |
 | `GET` | `/api/intelligence/redhat` | Query Red Hat advisories |
+
+## Django and FastAPI support
+
+SentinelForge scans both framework types automatically:
+
+```bash
+# Scan detects FastAPI + Django URL patterns
+.venv/bin/sentinelforge scan examples/vulnerable_shop
+
+# Django BOLA detector parses urls.py patterns and checks for ownership guards
+.venv/bin/sentinelforge scan /path/to/django-project
+```
+
+The Django detector parses `urls.py` patterns, identifies views that load objects without ownership checks, and flags potential broken object-level authorization (BOLA) vulnerabilities.
+
+## GitHub integration
+
+Connect to GitHub to list repositories, clone them, and scan remotely:
+
+```bash
+# List your repositories
+.venv/bin/sentinelforge gh-list
+
+# Clone and scan a GitHub repository
+.venv/bin/sentinelforge gh-scan owner/repo
+```
+
+Set `GITHUB_TOKEN` in your `.env` to authenticate.
+
+## PR generation
+
+SentinelForge can automatically create pull requests with security fixes:
+
+```bash
+# Generate a security fix branch and PR
+curl -X POST http://localhost:8741/api/github/create-pr \
+  -H "Content-Type: application/json" \
+  -d '{"repository": "/path/to/repo", "finding": {...}}'
+```
+
+Each PR includes a structured body with severity, rule ID, remediation steps, and a SHA-256 patch receipt.
+
+## CI/CD pipeline generation
+
+Generate security-integrated CI/CD pipelines for GitHub Actions, GitLab CI, or pre-commit hooks:
+
+```bash
+# Generate GitHub Actions workflow
+curl -X POST http://localhost:8741/api/cicd/generate \
+  -H "Content-Type: application/json" \
+  -d '{"repository": "/path/to/repo", "platform": "github_actions"}'
+```
+
+Generated pipelines include automated scanning on PRs, scheduled pentests, and optional auto-patching.
+
+## Ownership proof
+
+Before scanning external targets, prove you own them:
+
+```bash
+# Create a file-based ownership challenge
+curl -X POST http://localhost:8741/api/ownership/challenge \
+  -H "Content-Type: application/json" \
+  -d '{"target_path": "/path/to/target", "challenge_type": "file"}'
+
+# Verify ownership after placing the challenge token
+curl -X POST http://localhost:8741/api/ownership/verify \
+  -H "Content-Type: application/json" \
+  -d '{"target_path": "/path/to/target", "challenge_type": "file", "token": "..."}'
+```
+
+Supports file, DNS TXT, and HTTP endpoint challenge types.
 
 ## Integrations
 
+- **GitHub** - Repository listing, cloning, and automated PR generation
 - **NVIDIA Nemotron/NIM** - Agent reasoning, threat analysis, patch generation
 - **OpenShell** - Policy-enforced execution sandboxes with deny-by-default
 - **HiddenLayer** - Prompt injection and model I/O defense scanning
@@ -130,6 +211,7 @@ NVIDIA_API_KEY=...
 NIM_BASE_URL=https://integrate.api.nvidia.com/v1
 NIM_MODEL=nvidia/nemotron-3-nano-30b-a3b
 HIDDENLAYER_API_KEY=...
+GITHUB_TOKEN=...
 ```
 
 The CLI and server automatically load a project-local `.env`.
@@ -146,13 +228,16 @@ SentinelForge targets only explicitly authorized staging environments and contro
 
 ## What the system proves
 
-- Deterministic BOLA detection from actual FastAPI routes
+- Deterministic BOLA detection from FastAPI routes and Django URL patterns
 - Multi-vector exploitation with replayable evidence
 - AI-powered threat analysis via NVIDIA Nemotron
 - Dependency vulnerability cross-referencing against Red Hat advisories
 - Code-level exploit pattern detection (18 patterns)
 - Prompt injection defense via HiddenLayer
 - Policy enforcement via OpenShell
+- Ownership verification before scanning external targets
+- Automated PR generation with security patches and evidence
+- CI/CD pipeline generation with built-in security gates
 - Minimal patched artifact with regression tests
 - Release security attestation with evidence hashes
 
@@ -168,22 +253,29 @@ sentinelforge/
     vuln_scanner.py # Red Hat CVE cross-reference
     exploit_patterns.py # 18 code-level patterns
     threat_analyzer.py  # NIM-powered threat analysis
+  detectors/        # Framework-specific vulnerability detectors
+    fastapi_bola.py # FastAPI route BOLA detection
+    django_bola.py  # Django URL pattern + BOLA detection
   integrations/     # External service adapters
+    github.py       # GitHub API client (repos, clone)
     hiddenlayer.py  # Prompt injection scanning
     openshell.py    # Policy enforcement
     red_hat.py      # Security data API
     supabase.py     # Cloud persistence
   control/          # API and storage
-    api.py          # FastAPI control plane
+    api.py          # FastAPI control plane (scan, pentest, GitHub, ownership, CI/CD)
     storage.py      # SQLite event store
     models.py       # Pydantic models
   inference/        # NIM patch proposals
     nvidia_nim.py   # NVIDIA NIM adapter
-  web/static/       # Dashboard SPA
+  web/static/       # Dashboard SPA (5 views: Scan, Release Proof, Pentest, Schedule, Settings)
   orchestrator.py   # Phase-based agent orchestration
   pentest.py        # Pentest service
   pentest_modes.py  # 6 enterprise pentest modes
   scheduler.py      # Recurring scan scheduler
+  ownership.py      # Ownership proof (file, DNS, HTTP challenges)
+  pr_generator.py   # GitHub PR generation with security fixes
+  cicd.py           # CI/CD pipeline templates (GitHub Actions, GitLab CI, pre-commit)
   cli.py            # Command-line interface
 ```
 
