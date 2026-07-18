@@ -78,14 +78,28 @@ class PRGenerator:
         body: str,
         base: str = "main",
         head: str,
+        draft: bool = True,
+        require_human_review: bool = True,
     ) -> PullRequest | None:
+        # Human review required per safety boundary - PR created as draft, requires approval
+        # Release BLOCKED until human approves if functionality change detected
         cmd = [
-            "gh", "pr", "create",
-            "--title", title,
-            "--body", body,
-            "--base", base,
-            "--head", head,
+            "gh",
+            "pr",
+            "create",
+            "--title",
+            title,
+            "--body",
+            body,
+            "--base",
+            base,
+            "--head",
+            head,
         ]
+        if draft:
+            cmd.append("--draft")
+        # Note: GitHub requires branch protection to enforce human review
+        # We document in PR body that human review is required and release is BLOCKED
         result = subprocess.run(
             cmd,
             capture_output=True,

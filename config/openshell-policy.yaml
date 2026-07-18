@@ -84,10 +84,29 @@ rules:
     severity: critical
 
   - action: deny
+    description: Block database nuking - DROP TABLE, DROP DATABASE, TRUNCATE
+    match: '(?i)\b(DROP\s+TABLE|DROP\s+DATABASE|TRUNCATE\s+TABLE|DELETE\s+FROM.*WHERE\s+1=1|DROP\s+SCHEMA)\b'
+    category: destructive
+    severity: critical
+    remediation: Destructive DB operations blocked per safety boundary - only read-only BOLA and non-destructive injection probes allowed
+
+  - action: deny
+    description: Block mass deletion - DELETE without WHERE, rm -rf
+    match: '(?i)(DELETE\s+FROM\s+\w+\s*;|DELETE\s+FROM\s+\w+\s*$|rm\s+-rf\s+/$|rm\s+-rf\s+/\*|:\(\)\{.*\})'
+    category: destructive
+    severity: critical
+
+  - action: deny
     description: Block denial of service payloads
     match: 'http:.*(slowloris|/dev/urandom|1000000|a{1000,})'
     category: dos
     severity: high
+
+  - action: deny
+    description: Block destructive SQL payloads - UPDATE without WHERE
+    match: '(?i)\b(UPDATE\s+\w+\s+SET.*;\s*--|UPDATE.*WHERE\s+1=1)\b'
+    category: destructive
+    severity: critical
 
   - action: allow
     description: Allow local staging requests
