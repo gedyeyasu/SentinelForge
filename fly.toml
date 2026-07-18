@@ -1,0 +1,59 @@
+app = "sentinelforge"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8741"
+  SENTINELFORGE_ALLOWED_ROOTS = "/app"
+  SENTINELFORGE_DB_PATH = "/app/.sentinelforge/control.db"
+  PYTHONUNBUFFERED = "1"
+
+[http_service]
+  internal_port = 8741
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 75
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8741
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 75
+
+[checks]
+  [checks.health]
+    port = 8741
+    type = "http"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+# Mount volume for persistent storage (exploits, attestations, db, keys)
+# Uncomment after creating volume: fly volumes create sentinelforge_data --region iad --size 10
+# [[mounts]]
+#   source = "sentinelforge_data"
+#   destination = "/app/.sentinelforge"

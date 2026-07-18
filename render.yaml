@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: sentinelforge
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8741
+      - key: SENTINELFORGE_ALLOWED_ROOTS
+        value: /app
+      - key: SENTINELFORGE_DB_PATH
+        value: /app/.sentinelforge/control.db
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_OAUTH_CALLBACK_URL
+        value: https://sentinelforge.onrender.com/api/github/oauth/callback
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: HIDDENLAYER_CLIENT_ID
+        sync: false
+      - key: HIDDENLAYER_CLIENT_SECRET
+        sync: false
+      - key: HL_PROJECT_ID
+        sync: false
