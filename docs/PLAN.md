@@ -1,6 +1,7 @@
+<!-- /autoplan restore point: /Users/gedeoneyasu/.gstack/projects/gedyeyasu-SentinelForge/main-autoplan-restore-20260717-195000.md -->
 # SentinelForge Implementation Plan
 
-Status: DRAFT FOR GSTACK AUTOPLAN
+Status: APPROVED PREMISES — IMPLEMENTATION IN PROGRESS
 Hackathon: AITX Community x NVIDIA Claw Agent Hackathon
 Deadline: July 19, 2026, 11:00 AM America/Chicago
 Primary track: Red Hat Live Data
@@ -337,47 +338,57 @@ The implementation language is Python 3.12. FastAPI provides the control-plane A
 
 ## 12. Implementation Lakes
 
-### Lake 1: Runnable control plane
+### Lake 1: Deterministic detection and evidence
 
-- Initialize Python project, linting, typing, tests, and configuration.
-- Implement run and event models.
+- Initialize the Python project, linting, tests, and configuration.
+- Implement a narrow explainable FastAPI BOLA detector.
+- Derive a tenant-authorization invariant from the actual route and object load.
+- Emit a stable finding ID, confidence, evidence, and remediation contract.
+- Provide a controlled two-tenant vulnerable fixture.
+
+Exit test: the detector finds the missing tenant check, produces no finding when an explicit check exists, and never modifies the source repository.
+
+### Lake 2: Isolated patch and verification
+
+- Copy the target into an isolated run workspace.
+- Create a minimal authorization patch and permanent regression test.
+- Produce a content-addressed unified-diff bundle.
+- Run the generated security test and existing repository tests.
+- Retain exact verification output and patch digest.
+
+Exit test: the original fixture remains vulnerable and unchanged, while the isolated patched copy passes both cross-tenant denial and normal behavior tests.
+
+### Lake 3: Runnable control plane
+
+- Implement typed run and append-only event models.
 - Implement `POST /api/runs`, `GET /api/runs/{id}`, and event streaming.
-- Add deterministic mock inference.
-- Add a minimal dashboard timeline.
+- Add deterministic mock inference and policy adapters.
+- Add a minimal verdict dashboard timeline.
 
-Exit test: a mock run moves through every state and renders live events.
+Exit test: a detection-and-remediation run moves through every state and renders live evidence.
 
-### Lake 2: Governed target execution
+### Lake 4: Governed active pentesting
 
 - Parse and validate `scope.yaml`.
 - Enforce host, method, path, request-count, and rate limits.
-- Add kill-switch support.
-- Add OpenShell policy and launcher adapter.
-- Demonstrate an out-of-scope request being blocked.
-
-Exit test: no attack request can reach a host outside the approved target.
-
-### Lake 3: Real attack and evidence
-
-- Map OpenAPI or observed routes.
-- Create or load two synthetic identities.
+- Add kill-switch support and an OpenShell adapter.
+- Map OpenAPI or observed routes and load two synthetic identities.
 - Implement the authorization attacker first.
 - Validate and persist a replayable exploit receipt.
-- Convert the exploit into a pytest regression test template.
+- Replay the exploit and bounded mutations against candidate and patch.
 
-Exit test: the controlled vulnerable fixture is exploited and evidence is replayable.
+Exit test: the controlled vulnerable fixture is exploited, the receipt is replayable, the same attack is blocked by the verified patch, and no request can leave the approved target.
 
-### Lake 4: Patch and verification loop
+### Lake 5: Model-assisted patch competition
 
-- Create an isolated temporary worktree.
-- Generate two or more patch candidates through Nemotron.
+- Generate one patch candidate through Nemotron, retaining the deterministic patch as the baseline.
 - Apply candidates independently.
 - Run exploit, mutations, and existing tests.
 - Rank candidates and retain rejection reasons.
 
 Exit test: the vulnerable fixture fails before the patch and passes after the selected patch.
 
-### Lake 5: Sponsor integrations
+### Lake 6: Sponsor integrations
 
 - Connect NVIDIA NIM and record model telemetry.
 - Check in NemoClaw heartbeat and agent manifest.
@@ -387,7 +398,7 @@ Exit test: the vulnerable fixture fails before the patch and passes after the se
 
 Exit test: each sponsor integration has a visible health check and appears in one complete run trace.
 
-### Lake 6: GitHub and product target
+### Lake 7: GitHub and product target
 
 - Add GitHub App, token, or MCP adapter with least privilege.
 - Read the controlled product branch and create a temporary patch branch.
@@ -397,7 +408,7 @@ Exit test: each sponsor integration has a visible health check and appears in on
 
 Exit test: a controlled product vulnerability produces an evidence-backed PR without touching production.
 
-### Lake 7: Demo reliability
+### Lake 8: Demo reliability
 
 - Seed a realistic vulnerability in a controlled demo branch.
 - Add a one-command reset.
@@ -434,21 +445,33 @@ Critical deterministic cases:
 
 ## 14. Acceptance Criteria
 
+### P0 — detection and patching must pass
+
+1. A controlled FastAPI authorization defect is detected from source structure without a model declaring the verdict.
+2. The finding contains a stable ID, invariant, precise location, structured evidence, confidence, and remediation contract.
+3. The source repository remains unchanged; all edits occur in an isolated run workspace.
+4. The patch adds an ownership check and a permanent cross-tenant regression test.
+5. The patched copy no longer triggers the detector and passes the generated security test plus existing tests.
+6. A content-addressed patch bundle and exact verification report are produced.
+
+### P1 — active pentesting must pass after P0
+
 1. A manual or release trigger starts a visible multi-step run.
 2. The run uses at least three specialized agents with distinct bounded tools.
-3. Every executable attack is confined by an OpenShell policy.
+3. Every executable attack is confined by the active policy adapter; OpenShell is the sponsored implementation.
 4. A blocked out-of-scope action is visible in the demo.
-5. Nemotron is the central model and every inference is traceable.
-6. HiddenLayer checks untrusted input and output and blocks a demonstrated injection attempt.
-7. A real Red Hat advisory response appears in the run timeline.
-8. A controlled vulnerability is exploited with replayable evidence.
-9. At least two patch candidates are evaluated.
-10. The selected patch blocks the exploit and passes existing tests.
-11. The exploit becomes a permanent regression test.
-12. The system produces an evidence-backed PR or exact dry-run PR artifact.
-13. The system records attack coverage, latency, inference cost, and residual risk.
-14. The second related run demonstrates measurable improvement from persistent memory.
-15. Five consecutive rehearsals complete without manual repair.
+5. A controlled vulnerability is exploited with independently replayable evidence.
+6. The same receipt succeeds against the candidate and is blocked against the exact patched artifact.
+7. The system produces an evidence-backed local PR payload awaiting human approval.
+
+### P2 — sponsor showcase
+
+1. Nemotron is the central model and every inference is traceable.
+2. HiddenLayer checks untrusted input and output and blocks a demonstrated injection attempt.
+3. A real Red Hat advisory changes an attack hypothesis or creates explicit no-impact evidence.
+4. NemoClaw exposes the fixed roster and heartbeat; OpenShell proves containment.
+5. vLLM/Brev demonstrates measured concurrent inference without becoming a demo dependency.
+6. Five consecutive rehearsals complete without manual repair.
 
 ## 15. Demo Timeline
 
@@ -548,7 +571,9 @@ Critical deterministic cases:
 - GitHub permission model for creating a controlled branch and PR.
 - NVIDIA, HiddenLayer, and optional Featherless credentials through local environment variables, never chat or committed files.
 
-## 20. Premises for Human Confirmation
+## 20. Confirmed Premises
+
+Approved by the builder on 2026-07-17.
 
 1. The first complete vertical slice should prioritize API authorization and cross-tenant access because it demonstrates active business-logic exploitation better than dependency scanning alone.
 2. The primary demo target will be a controlled branch and authorized staging environment, never production.
@@ -562,12 +587,21 @@ Critical deterministic cases:
 
 | Review | Trigger | Why | Runs | Status | Findings |
 |---|---|---|---:|---|---|
-| CEO Review | `/plan-ceo-review` | Scope and strategy | 0 | pending | Autoplan premise gate pending |
-| Eng Review | `/plan-eng-review` | Architecture and tests | 0 | pending | Runs after premise confirmation |
-| Design Review | `/plan-design-review` | Dashboard UX | 0 | pending | UI scope detected |
-| DX Review | `/plan-devex-review` | Setup and integration experience | 0 | pending | Developer-tool scope detected |
+| Office Hours | `/office-hours` | Product definition and narrow wedge | 3 | complete | Design specification improved from 6.5 to 9.4/10 |
+| CEO Review | `/plan-ceo-review` | Scope and strategy | 1 | complete | Narrowed category to proof-carrying release gate; P0/P1/P2 conflict resolved |
+| Eng Review | `/plan-eng-review` | Architecture and tests | 0 | pending | Runs against detection/patching implementation |
+| Design Review | `/plan-design-review` | Dashboard UX | 0 | pending | Deferred until control-plane UI lake |
+| DX Review | `/plan-devex-review` | Setup and integration experience | 0 | pending | Runs after one-command local workflow exists |
 
-**VERDICT:** Autoplan review pending human confirmation of the seven premises.
+**VERDICT:** Premises approved. Detection-and-patching P0 authorized and in progress; active pentesting follows only after P0 passes.
 
-**UNRESOLVED DECISIONS:**
-- Confirm or amend the seven premises in Section 20 before implementation begins.
+## Decision Audit Trail
+
+| Date | Decision | Reason | Status |
+|---|---|---|---|
+| 2026-07-17 | Accept all seven premises | Explicit builder approval | locked |
+| 2026-07-17 | Position as a proof-carrying release gate, not a general autonomous security team | Creates a falsifiable wedge and avoids unprovable coverage claims | locked |
+| 2026-07-17 | Build deterministic vulnerability detection and isolated patch verification before active pentesting | Explicit builder sequencing; creates a trustworthy substrate for later attack agents | locked |
+| 2026-07-17 | Keep sponsor services behind typed adapters | Preserves demo reliability and makes the receipt/invariant corpus the durable product asset | locked |
+
+**UNRESOLVED DECISIONS:** None block P0 implementation. Product repository, staging target, and sponsor credentials are required only for later lakes.
