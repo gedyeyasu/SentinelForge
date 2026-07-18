@@ -1,3 +1,4 @@
+from sentinelforge.integrations.github import GitHubClient, GitHubRepo
 from sentinelforge.integrations.hiddenlayer import (
     HiddenLayerClient,
     ScanResult,
@@ -21,6 +22,8 @@ from sentinelforge.integrations.supabase import (
 
 __all__ = [
     "DEFAULT_POLICY",
+    "GitHubClient",
+    "GitHubRepo",
     "HiddenLayerClient",
     "OpenShellPolicy",
     "OpenShellPolicyEngine",

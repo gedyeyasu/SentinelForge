@@ -10,8 +10,9 @@ from dotenv import load_dotenv
 from sentinelforge.config import resolve_nvidia_config
 from sentinelforge.control.models import PentestRunRequest
 from sentinelforge.control.storage import SQLiteRunStore
-from sentinelforge.detectors import FastAPIBOLADetector
+from sentinelforge.detectors import DjangoBOLADetector, FastAPIBOLADetector
 from sentinelforge.inference import NIMPatchProposer
+from sentinelforge.integrations.github import GitHubClient
 from sentinelforge.pentest import PentestService
 from sentinelforge.remediation import (
     CandidateEvaluation,
@@ -31,7 +32,9 @@ def _write_json(path: Path, payload: object) -> None:
 
 def scan_command(args: argparse.Namespace) -> int:
     root = Path(args.repository)
-    findings = FastAPIBOLADetector().scan(root)
+    findings = []
+    findings.extend(FastAPIBOLADetector().scan(root))
+    findings.extend(DjangoBOLADetector().scan(root))
     payload = {"repository": str(root.resolve()), "findings": [item.to_dict() for item in findings]}
     if args.output:
         _write_json(Path(args.output), payload)
@@ -224,6 +227,94 @@ def pentest_schedule_command(args: argparse.Namespace) -> int:
     return 1
 
 
+def gh_list_command(args: argparse.Namespace) -> int:
+    client = GitHubClient()
+    if not client.configured:
+        print(json.dumps({"error": "GITHUB_TOKEN not set. Export it or add to .env."}))
+        return 1
+    repos = client.list_repos(
+        owner=args.owner or None,
+        per_page=args.limit,
+        repo_type=args.type,
+    )
+    payload = {
+        "repos": [r.to_dict() for r in repos],
+        "total": len(repos),
+    }
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def gh_scan_command(args: argparse.Namespace) -> int:
+    client = GitHubClient()
+    if not client.configured:
+        print(json.dumps({"error": "GITHUB_TOKEN not set. Export it or add to .env."}))
+        return 1
+
+    if args.clone_url:
+        clone_url = args.clone_url
+    elif args.owner and args.repo:
+        info = client.get_repo_info(args.owner, args.repo)
+        if info is None:
+            print(json.dumps({"error": f"Repo {args.owner}/{args.repo} not found"}))
+            return 1
+        clone_url = info.get("clone_url", "")
+    else:
+        print(json.dumps({"error": "Provide --clone-url or --owner/--repo"}))
+        return 1
+
+    if not clone_url:
+        print(json.dumps({"error": "Could not determine clone URL"}))
+        return 1
+
+    print(json.dumps({"status": "cloning", "url": clone_url}), flush=True)
+    try:
+        repo_dir = client.clone_repo(
+            clone_url,
+            branch=args.branch or None,
+        )
+    except Exception as error:
+        print(json.dumps({"error": f"Clone failed: {error}"}))
+        return 1
+
+    print(json.dumps({"status": "scanning", "path": str(repo_dir)}), flush=True)
+    findings = []
+    findings.extend(FastAPIBOLADetector().scan(repo_dir))
+    findings.extend(DjangoBOLADetector().scan(repo_dir))
+
+    from sentinelforge.agents.dependencies import DependencyParser
+    from sentinelforge.agents.exploit_patterns import ExploitPatternScanner
+    from sentinelforge.agents.vuln_scanner import DependencyVulnerabilityScanner
+
+    pattern_result = ExploitPatternScanner().scan_project(repo_dir)
+    dep_parser = DependencyParser()
+    dep_findings = []
+    try:
+        manifest = dep_parser.parse_project(repo_dir)
+        scanner = DependencyVulnerabilityScanner()
+        scan_result = scanner.scan(manifest, repository_root=str(repo_dir))
+        dep_findings = [v.to_dict() for v in scan_result.vulnerabilities]
+    except Exception:
+        pass
+
+    payload = {
+        "repository": str(repo_dir),
+        "clone_url": clone_url,
+        "bola_findings": [item.to_dict() for item in findings],
+        "pattern_findings": pattern_result.to_dict(),
+        "dependency_vulnerabilities": dep_findings,
+        "summary": {
+            "bola_count": len(findings),
+            "pattern_count": len(pattern_result.findings),
+            "dep_vuln_count": len(dep_findings),
+        },
+    }
+    if args.output:
+        _write_json(Path(args.output), payload)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 1 if findings or pattern_result.findings or dep_findings else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     nvidia = resolve_nvidia_config()
     parser = argparse.ArgumentParser(prog="sentinelforge")
@@ -326,6 +417,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", default=".sentinelforge/control/runs.sqlite3"
     )
     pentest_sched.set_defaults(handler=pentest_schedule_command)
+
+    gh_list = subparsers.add_parser(
+        "gh-list", help="List GitHub repositories"
+    )
+    gh_list.add_argument(
+        "--owner", default="",
+        help="List repos for this owner (default: authenticated user)",
+    )
+    gh_list.add_argument("--limit", type=int, default=30)
+    gh_list.add_argument(
+        "--type", default="all", choices=["all", "owner", "public", "private", "member"],
+        help="Repository type filter",
+    )
+    gh_list.set_defaults(handler=gh_list_command)
+
+    gh_scan = subparsers.add_parser(
+        "gh-scan", help="Clone a GitHub repo and run security scanning"
+    )
+    gh_scan.add_argument("--clone-url", default="", help="Git clone URL directly")
+    gh_scan.add_argument("--owner", default="", help="GitHub owner/org")
+    gh_scan.add_argument("--repo", default="", help="GitHub repo name")
+    gh_scan.add_argument("--branch", default="", help="Branch to scan (default: repo default)")
+    gh_scan.add_argument("--output", default="", help="Write results to JSON file")
+    gh_scan.set_defaults(handler=gh_scan_command)
 
     return parser
 
