@@ -1,0 +1,1 @@
+"""SentinelForge dashboard package."""

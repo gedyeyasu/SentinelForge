@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from sentinelforge.control import create_app
@@ -25,6 +26,7 @@ def application_from_environment() -> FastAPI:
     )
 
 
+load_dotenv()
 app = application_from_environment()
 
 

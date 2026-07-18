@@ -36,6 +36,8 @@ export NVIDIA_API_KEY='set-this-locally-never-commit-it'
 
 `NIM_BASE_URL` and `NIM_MODEL` are configurable so the same adapter can target the hosted NVIDIA endpoint, a local NIM, or vLLM later. Without a key, the deterministic detection and remediation path remains fully operational.
 
+The CLI and server automatically load a project-local `.env`. Use `.env.example` as the exact format: one uppercase `KEY=value` assignment per line, with no spaces around `=` and no `export` prefix.
+
 The controlled fixture is deliberately vulnerable and must never be publicly deployed. Remediation happens only in `.sentinelforge/runs/<finding-id>/patched`; SentinelForge does not modify the source repository, push a branch, open a pull request, merge, deploy, or send attack traffic in this phase.
 
 ## What the command proves

@@ -6,6 +6,8 @@ import os
 import uuid
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from sentinelforge.detectors import FastAPIBOLADetector
 from sentinelforge.inference import NIMPatchProposer
 from sentinelforge.remediation import (
@@ -187,6 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    load_dotenv()
     args = build_parser().parse_args()
     return int(args.handler(args))
 

@@ -99,3 +99,34 @@ def test_api_rejects_unapproved_repository(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 403
+
+
+def test_dashboard_and_static_assets_are_served(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "never-render-this-test-key")
+    monkeypatch.setenv("NIM_MODEL", "nvidia/test-nemotron")
+    app = create_app(
+        database_path=tmp_path / "api.sqlite3",
+        workspace_root=tmp_path / "workspaces",
+        allowed_roots=(REPOSITORY_ROOT,),
+    )
+    client = TestClient(app)
+
+    dashboard = client.get("/")
+    stylesheet = client.get("/assets/app.css")
+    script = client.get("/assets/app.js")
+    integrations = client.get("/api/integrations")
+
+    assert dashboard.status_code == 200
+    assert "The proof is the product" not in dashboard.text
+    assert "Release security evidence" in dashboard.text
+    assert "candidate-verdict" in dashboard.text
+    assert stylesheet.status_code == 200
+    assert "--blocked: #ff5a5f" in stylesheet.text
+    assert script.status_code == 200
+    assert "function renderRun" in script.text
+    assert integrations.status_code == 200
+    assert integrations.json()["nvidia_nim"] == {
+        "status": "configured",
+        "model": "nvidia/test-nemotron",
+    }
+    assert "never-render-this-test-key" not in integrations.text

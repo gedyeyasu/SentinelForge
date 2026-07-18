@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from sentinelforge.control.models import DetectionRunRequest, RunEvent, RunRecord
 from sentinelforge.control.service import DetectionRunService, RepositoryNotAuthorizedError
@@ -21,10 +24,32 @@ def create_app(
         allowed_roots=allowed_roots,
     )
     app = FastAPI(title="SentinelForge Control Plane", version="0.1.0")
+    static_root = Path(__file__).parents[1] / "web" / "static"
+    app.mount("/assets", StaticFiles(directory=static_root), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    def dashboard() -> FileResponse:
+        return FileResponse(static_root / "index.html")
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/integrations")
+    def integrations() -> dict[str, dict[str, object]]:
+        return {
+            "deterministic": {"status": "active"},
+            "nvidia_nim": {
+                "status": "configured" if os.environ.get("NVIDIA_API_KEY") else "awaiting_key",
+                "model": os.environ.get("NIM_MODEL", "nvidia/nemotron-3-super-120b-a12b"),
+            },
+            "red_hat_security_data": {"status": "public_api"},
+            "hiddenlayer": {
+                "status": (
+                    "configured" if os.environ.get("HIDDENLAYER_API_KEY") else "awaiting_key"
+                )
+            },
+        }
 
     @app.post("/api/runs", response_model=RunRecord, status_code=202)
     def create_run(request: DetectionRunRequest, tasks: BackgroundTasks) -> RunRecord:

@@ -9,7 +9,7 @@ from sentinelforge.domain import VerificationReport, VerificationStatus
 
 
 def verify_python_project(project_root: Path, timeout_seconds: int = 90) -> VerificationReport:
-    command = (sys.executable, "-m", "pytest", "-q")
+    command = (sys.executable, "-m", "pytest")
     started = time.monotonic()
     try:
         result = subprocess.run(

@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <meta
+      name="description"
+      content="SentinelForge proof-carrying release security dashboard"
+    />
+    <title>SentinelForge · Release Proof</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/assets/app.css" />
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to evidence</a>
+    <div class="app-shell">
+      <aside class="rail" aria-label="Primary navigation">
+        <a class="wordmark" href="/" aria-label="SentinelForge home">
+          <span class="wordmark-mark" aria-hidden="true">SF</span>
+          <span>
+            <strong>SENTINEL</strong>
+            <small>FORGE</small>
+          </span>
+        </a>
+
+        <nav class="rail-nav">
+          <a class="nav-item active" href="#release-proof" aria-current="page">
+            <span class="nav-index">01</span>
+            Release proof
+          </a>
+          <a class="nav-item" href="#evidence-timeline">
+            <span class="nav-index">02</span>
+            Evidence
+          </a>
+          <a class="nav-item" href="#patch-receipt">
+            <span class="nav-index">03</span>
+            Patch receipt
+          </a>
+          <span class="nav-item disabled" aria-disabled="true">
+            <span class="nav-index">04</span>
+            Policies
+            <small>next</small>
+          </span>
+        </nav>
+
+        <div class="integration-stack" aria-label="Integration status">
+          <p class="eyebrow">EXECUTION LANE</p>
+          <div class="integration-row">
+            <span class="status-dot safe"></span>
+            <span>Deterministic core</span>
+            <strong>ACTIVE</strong>
+          </div>
+          <div class="integration-row" id="nim-integration">
+            <span class="status-dot waiting"></span>
+            <span>Nemotron / NIM</span>
+            <strong id="nim-integration-status">KEY</strong>
+          </div>
+          <div class="integration-row">
+            <span class="status-dot safe"></span>
+            <span>Red Hat CSAF</span>
+            <strong>PUBLIC</strong>
+          </div>
+        </div>
+
+        <div class="rail-footer">
+          <span class="connection-line">
+            <span class="status-dot" id="connection-dot"></span>
+            <span id="connection-label">CONNECTING</span>
+          </span>
+          <button class="icon-button" id="theme-toggle" type="button" aria-label="Use light mode">
+            <span aria-hidden="true">◐</span>
+          </button>
+        </div>
+      </aside>
+
+      <main id="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">PROOF-CARRYING RELEASE GATE</p>
+            <h1>Release security evidence</h1>
+          </div>
+          <div class="topbar-meta">
+            <span class="meta-block">
+              <small>CONTROL PLANE</small>
+              <strong>LOCAL · 8741</strong>
+            </span>
+            <span class="meta-block">
+              <small>POLICY</small>
+              <strong>HUMAN MERGE GATE</strong>
+            </span>
+          </div>
+        </header>
+
+        <div class="content-wrap">
+          <section class="run-launcher" aria-labelledby="launcher-title">
+            <div class="launcher-copy">
+              <p class="eyebrow">NEW ANALYSIS</p>
+              <h2 id="launcher-title">Turn a release defect into verified proof.</h2>
+              <p>
+                SentinelForge scans an authorized repository, patches an isolated copy,
+                generates a permanent security test, and records the exact verification result.
+              </p>
+            </div>
+            <form id="run-form" class="run-form">
+              <label for="repository">Authorized repository path</label>
+              <div class="input-row">
+                <input
+                  id="repository"
+                  name="repository"
+                  value="examples/vulnerable_shop"
+                  autocomplete="off"
+                  spellcheck="false"
+                  required
+                />
+                <button class="primary-button" id="run-button" type="submit">
+                  <span>Start proof run</span>
+                  <span aria-hidden="true">→</span>
+                </button>
+              </div>
+              <label class="check-row">
+                <input id="remediate" type="checkbox" checked />
+                <span>Generate and verify an isolated patch</span>
+              </label>
+            </form>
+          </section>
+
+          <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+          <section id="empty-state" class="empty-state">
+            <div class="empty-sequence" aria-label="SentinelForge proof sequence">
+              <span><b>01</b> Detect</span>
+              <i></i>
+              <span><b>02</b> Patch</span>
+              <i></i>
+              <span><b>03</b> Verify</span>
+              <i></i>
+              <span><b>04</b> Gate</span>
+            </div>
+            <p>
+              No active run. The controlled demo fixture is ready and contains one intentional
+              cross-tenant authorization defect.
+            </p>
+          </section>
+
+          <section id="release-proof" class="proof-workspace" hidden aria-live="polite">
+            <div class="run-identity">
+              <div>
+                <span class="lifecycle-pill" id="lifecycle">QUEUED</span>
+                <span class="run-id" id="run-id">SF_RUN_—</span>
+              </div>
+              <div class="run-identity-meta">
+                <span id="run-repository">repository</span>
+                <span id="run-updated">updated —</span>
+              </div>
+            </div>
+
+            <div class="verdict-comparison" aria-label="Candidate and patch verdict comparison">
+              <article class="verdict-panel candidate" id="candidate-panel">
+                <header>
+                  <span>RELEASE CANDIDATE</span>
+                  <code id="candidate-ref">SOURCE</code>
+                </header>
+                <strong class="verdict-value" id="candidate-verdict">PENDING</strong>
+                <p id="candidate-caption">Scanning the candidate for supported security defects.</p>
+              </article>
+
+              <div class="proof-transfer" aria-hidden="true">
+                <span>EXPLOIT-DERIVED INVARIANT</span>
+                <i></i>
+                <b>→</b>
+              </div>
+
+              <article class="verdict-panel patch" id="patch-panel">
+                <header>
+                  <span>PATCH CANDIDATE</span>
+                  <code id="patch-ref">AWAITING PROOF</code>
+                </header>
+                <strong class="verdict-value" id="patch-verdict">PENDING</strong>
+                <p id="patch-caption">Safety requires a fresh patch build and passing tests.</p>
+              </article>
+
+              <article class="health-panel">
+                <span>INTEGRATION HEALTH</span>
+                <strong id="integration-health">HEALTHY</strong>
+                <p>Security verdicts remain independent from sponsor availability.</p>
+              </article>
+            </div>
+
+            <div class="evidence-grid">
+              <article id="evidence-timeline" class="panel timeline-panel">
+                <header class="panel-header">
+                  <div>
+                    <p class="eyebrow">APPEND-ONLY LOG</p>
+                    <h2>Evidence timeline</h2>
+                  </div>
+                  <span class="event-count" id="event-count">0 EVENTS</span>
+                </header>
+                <ol class="timeline" id="timeline-list"></ol>
+              </article>
+
+              <article class="panel finding-panel">
+                <header class="panel-header">
+                  <div>
+                    <p class="eyebrow">CONFIRMED DETECTION</p>
+                    <h2>Security finding</h2>
+                  </div>
+                  <span class="severity-badge" id="finding-severity">PENDING</span>
+                </header>
+                <div id="finding-empty" class="panel-empty">Waiting for detector evidence.</div>
+                <div id="finding-detail" hidden>
+                  <code class="finding-rule" id="finding-rule"></code>
+                  <h3 id="finding-title"></h3>
+                  <p id="finding-description"></p>
+                  <dl class="evidence-list">
+                    <div>
+                      <dt>Endpoint</dt>
+                      <dd id="finding-endpoint"></dd>
+                    </div>
+                    <div>
+                      <dt>Location</dt>
+                      <dd id="finding-location"></dd>
+                    </div>
+                    <div>
+                      <dt>Confidence</dt>
+                      <dd id="finding-confidence"></dd>
+                    </div>
+                  </dl>
+                  <div class="invariant-box">
+                    <span>SECURITY INVARIANT</span>
+                    <p id="finding-invariant"></p>
+                  </div>
+                </div>
+              </article>
+
+              <article id="patch-receipt" class="panel receipt-panel">
+                <header class="panel-header">
+                  <div>
+                    <p class="eyebrow">CONTENT-ADDRESSED ARTIFACT</p>
+                    <h2>Patch receipt</h2>
+                  </div>
+                  <button class="text-button" id="copy-digest" type="button" disabled>Copy digest</button>
+                </header>
+                <div class="digest-block">
+                  <span>SHA-256</span>
+                  <code id="patch-digest">Waiting for a verified patch…</code>
+                </div>
+                <div class="receipt-facts">
+                  <div>
+                    <span>Changed files</span>
+                    <strong id="changed-files">—</strong>
+                  </div>
+                  <div>
+                    <span>Workspace</span>
+                    <strong>ISOLATED</strong>
+                  </div>
+                  <div>
+                    <span>Source mutated</span>
+                    <strong>NO</strong>
+                  </div>
+                  <div>
+                    <span>Human merge gate</span>
+                    <strong>REQUIRED</strong>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel verification-panel">
+                <header class="panel-header">
+                  <div>
+                    <p class="eyebrow">DETERMINISTIC JUDGE</p>
+                    <h2>Verification</h2>
+                  </div>
+                  <span class="verification-badge" id="verification-status">NOT RUN</span>
+                </header>
+                <div class="test-summary">
+                  <div>
+                    <strong id="test-count">—</strong>
+                    <span>checks passing</span>
+                  </div>
+                  <div>
+                    <strong id="verification-duration">—</strong>
+                    <span>verification time</span>
+                  </div>
+                </div>
+                <pre id="verification-output" tabindex="0">Awaiting isolated patch verification.</pre>
+              </article>
+            </div>
+
+            <footer class="proof-footer">
+              <p id="coverage-note">
+                Verdict applies only to the supported checks executed against this exact artifact.
+              </p>
+              <div>
+                <button class="secondary-button" id="download-evidence" type="button" disabled>
+                  Export evidence JSON
+                </button>
+                <button class="primary-button compact" id="repeat-run" type="button">
+                  Run again
+                </button>
+              </div>
+            </footer>
+          </section>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>
