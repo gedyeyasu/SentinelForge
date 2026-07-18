@@ -1547,6 +1547,356 @@ input:hover {
   }
 }
 
+/* ===== SCAN AGENT PROGRESS ===== */
+.scan-progress-section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.scan-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.scan-pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--info);
+  animation: scanPulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes scanPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(85, 182, 255, 0.4); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 8px rgba(85, 182, 255, 0); }
+}
+
+.scan-progress-header p {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.scan-agent-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.scan-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel-inset);
+  transition: all 0.25s ease;
+}
+
+.scan-agent-row.active {
+  border-color: var(--info);
+  background: var(--info-soft);
+}
+
+.scan-agent-row.done {
+  border-color: var(--safe);
+  background: var(--safe-soft);
+  opacity: 0.7;
+}
+
+.scan-agent-row.error {
+  border-color: var(--blocked);
+  background: var(--blocked-soft);
+}
+
+.scan-agent-icon {
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+}
+
+.scan-agent-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.7rem;
+  color: var(--text);
+  min-width: 160px;
+  flex-shrink: 0;
+}
+
+.scan-agent-detail {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-agent-status {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-dim);
+  flex-shrink: 0;
+  min-width: 50px;
+  text-align: right;
+}
+
+.scan-agent-row.active .scan-agent-status {
+  color: var(--info);
+}
+
+.scan-agent-row.done .scan-agent-status {
+  color: var(--safe);
+}
+
+.scan-agent-row.error .scan-agent-status {
+  color: var(--blocked);
+}
+
+.scan-log-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.scan-log-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.scan-log-status {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--info);
+  background: var(--info-soft);
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid var(--info);
+  animation: logBlink 1.5s steps(2) infinite;
+}
+
+@keyframes logBlink {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.scan-log {
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  line-height: 1.6;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  background: var(--panel-inset);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.5rem 0.75rem;
+}
+
+.scan-log-entry {
+  padding: 0.15rem 0;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scan-log-entry.log-started {
+  color: var(--info);
+}
+
+.scan-log-entry.log-completed {
+  color: var(--safe);
+}
+
+.scan-log-entry.log-finding {
+  color: var(--blocked);
+  font-weight: 500;
+}
+
+.scan-log-entry.log-error {
+  color: var(--blocked);
+}
+
+.scan-log-entry.log-complete {
+  color: var(--safe);
+  font-weight: 600;
+  font-size: 0.7rem;
+}
+
+.scan-log-entry.log-progress {
+  color: var(--muted-dim);
+  opacity: 0.7;
+}
+
+/* ===== ENTERPRISE SCAN RESULTS ===== */
+.scan-results-enterprise .scan-verdict-row {
+  gap: 1rem;
+}
+
+.scan-stat-card {
+  padding: 1.25rem 1.5rem;
+}
+
+.scan-stat-card .verdict-value {
+  font-size: 2.5rem;
+  line-height: 1;
+  margin: 0.5rem 0;
+}
+
+.scan-stat-card p {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.scan-findings-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.scan-findings-panel {
+  width: 100%;
+}
+
+.findings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.finding-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s ease;
+}
+
+.finding-row:hover {
+  background: var(--panel-raised);
+}
+
+.finding-row:last-child {
+  border-bottom: none;
+}
+
+.finding-row .severity-badge {
+  flex-shrink: 0;
+  min-width: 70px;
+  text-align: center;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.sev-critical { background: var(--blocked-soft); color: var(--blocked); border: 1px solid var(--blocked); }
+.sev-high { background: rgba(255, 120, 50, 0.12); color: #ff7832; border: 1px solid #ff7832; }
+.sev-medium { background: var(--warning-soft); color: var(--warning); border: 1px solid var(--warning); }
+.sev-low { background: var(--info-soft); color: var(--info); border: 1px solid var(--info); }
+
+.finding-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.finding-info strong {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+}
+
+.finding-info code {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+  padding: 0.15rem 0.4rem;
+  background: var(--panel-inset);
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  width: fit-content;
+}
+
+.finding-info p {
+  font-size: 0.75rem;
+  color: var(--text-soft);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.finding-row .text-button {
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+
+.scan-no-findings {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 2rem;
+  text-align: center;
+  justify-content: center;
+}
+
+.scan-no-findings-icon {
+  font-size: 2rem;
+}
+
+.scan-no-findings p {
+  color: var(--safe);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.scan-severity-summary {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-inset);
+}
+
+.severity-pill {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1759,4 +2109,47 @@ input:hover {
   padding-left: 0.5rem;
   background: var(--safe-soft);
   font-weight: 600;
+}
+
+/* Custom exploit writer - proves not a toy */
+.timeline-item.highlight-exploit {
+  border-left: 3px solid #55b6ff;
+  background: rgba(85, 182, 255, 0.08);
+  padding-left: 0.75rem;
+  margin: 0.5rem 0;
+  border-radius: 4px;
+}
+.timeline-item.highlight-exploit .timeline-marker {
+  background: #55b6ff;
+  color: #070b0d;
+  font-weight: 700;
+}
+.timeline-item.highlight-execution {
+  border-left: 3px solid #f5b942;
+  background: rgba(245, 185, 66, 0.08);
+  padding-left: 0.75rem;
+}
+.timeline-item.highlight-blocked {
+  border-left: 3px solid #34d399;
+  background: rgba(52, 211, 153, 0.08);
+}
+.exploit-file-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  border-radius: 2px;
+  margin-top: 4px;
+  color: var(--info);
+}
+.live-event.live-custom_exploit_written {
+  border-left: 3px solid var(--info);
+  background: var(--info-soft);
+  font-weight: 600;
+}
+.live-event.live-custom_exploit_executed {
+  border-left: 3px solid var(--warning);
+  background: var(--warning-soft);
 }

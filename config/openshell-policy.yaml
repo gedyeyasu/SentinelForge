@@ -108,10 +108,24 @@ rules:
     severity: info
 
   - action: allow
+    description: Allow custom exploit writer to write Python exploit files
+    match: 'file:write\s+\.sentinelforge/exploits/.*\.py'
+    category: filesystem
+    severity: info
+    rationale: Proves pentest is not toy - agent writes new exploit code per run, stored as artifact
+
+  - action: allow
     description: Allow safe pytest execution
     match: 'subprocess:\s*(python|pytest|pip).*\s+tests/'
     category: process
     severity: info
+
+  - action: allow
+    description: Allow custom exploit execution in sandbox (bounded, non-destructive)
+    match: 'subprocess:\s*python\s+\.sentinelforge/exploits/.*\.py'
+    category: process
+    severity: info
+    rationale: Custom exploit execution proves agent-written exploit runs against staging, blocked by policy if prod
 
 audit:
   log_all_denied: true

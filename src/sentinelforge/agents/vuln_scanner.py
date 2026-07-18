@@ -82,6 +82,7 @@ class DependencyVulnerabilityScanner:
         manifest: DependencyManifest,
         *,
         repository_root: str | None = None,
+        progress_callback=None,
     ) -> DependencyScanResult:
         unique_names = manifest.unique_names()
         all_vulns: list[DependencyVulnerability] = []
@@ -92,7 +93,24 @@ class DependencyVulnerabilityScanner:
         for dep in manifest.all_dependencies:
             dep_map[dep.normalized_name] = dep
 
-        for name in unique_names:
+        if progress_callback:
+            progress_callback("started", {
+                "unique_packages": len(unique_names),
+                "total_deps": len(manifest.all_dependencies),
+            })
+
+        for pkg_idx, name in enumerate(unique_names, 1):
+            dep = dep_map.get(name)
+            version = dep.version_constraint if dep else ""
+
+            if progress_callback:
+                progress_callback("checking_package", {
+                    "package": name,
+                    "version": version,
+                    "package_index": pkg_idx,
+                    "total_packages": len(unique_names),
+                })
+
             try:
                 advisories = self._red_hat.list_advisories(
                     package=name,
@@ -102,17 +120,44 @@ class DependencyVulnerabilityScanner:
                 advisory_count += len(advisories)
             except Exception as error:
                 errors.append(f"Red Hat query failed for {name}: {error}")
+                if progress_callback:
+                    progress_callback("package_error", {
+                        "package": name,
+                        "error": str(error),
+                    })
                 continue
 
-            dep = dep_map.get(name)
-            version = dep.version_constraint if dep else ""
-
+            pkg_vulns = 0
             for advisory in advisories:
                 vuln = self._evaluate_advisory(name, version, advisory, repository_root)
                 if vuln is not None:
                     all_vulns.append(vuln)
+                    pkg_vulns += 1
+                    if progress_callback:
+                        progress_callback("vuln_found", {
+                            "package": name,
+                            "advisory_id": advisory.advisory_id,
+                            "severity": advisory.severity,
+                            "cves": advisory.cves,
+                            "description": advisory.description[:100],
+                        })
+
+            if progress_callback:
+                progress_callback("package_complete", {
+                    "package": name,
+                    "advisories_checked": len(advisories),
+                    "vulnerabilities": pkg_vulns,
+                })
 
         all_vulns.sort(key=lambda v: (v.severity, v.dependency), reverse=True)
+
+        if progress_callback:
+            progress_callback("completed", {
+                "unique_packages": len(unique_names),
+                "advisories_checked": advisory_count,
+                "vulnerability_count": len(all_vulns),
+                "error_count": len(errors),
+            })
 
         return DependencyScanResult(
             manifest_dependencies=len(manifest.all_dependencies),

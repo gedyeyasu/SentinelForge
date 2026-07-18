@@ -121,6 +121,19 @@
 
             <div id="scan-error" class="error-banner" role="alert" hidden></div>
 
+            <section id="scan-progress" class="scan-progress-section" hidden>
+              <div class="scan-progress-header">
+                <div class="scan-pulse"></div>
+                <p id="scan-progress-title">Initializing scan agents…</p>
+              </div>
+              <div id="scan-agent-activity" class="scan-agent-activity"></div>
+              <div class="scan-log-header">
+                <span class="scan-log-label">SCAN TERMINAL</span>
+                <span class="scan-log-status">LIVE</span>
+              </div>
+              <div class="scan-log" id="scan-log"></div>
+            </section>
+
             <section id="scan-empty" class="empty-state">
               <div class="empty-sequence">
                 <span><b>01</b> BOLA</span><i></i>
@@ -131,7 +144,7 @@
               <p>Select a local repository or connect GitHub to start scanning.</p>
             </section>
 
-            <section id="scan-results" class="proof-workspace" hidden aria-live="polite">
+            <section id="scan-results" class="proof-workspace scan-results-enterprise" hidden aria-live="polite">
               <div class="run-identity">
                 <div>
                   <span class="lifecycle-pill" id="scan-lifecycle">COMPLETE</span>
@@ -139,26 +152,26 @@
                 </div>
               </div>
 
-              <div class="verdict-comparison">
-                <article class="verdict-panel candidate">
+              <div class="verdict-comparison scan-verdict-row">
+                <article class="verdict-panel candidate scan-stat-card">
                   <header><span>BOLA FINDINGS</span></header>
                   <strong class="verdict-value" id="scan-bola-count">0</strong>
-                  <p>Cross-tenant authorization gaps detected</p>
+                  <p>Cross-tenant authorization gaps</p>
                 </article>
-                <article class="verdict-panel patch">
+                <article class="verdict-panel patch scan-stat-card">
                   <header><span>PATTERN FINDINGS</span></header>
                   <strong class="verdict-value" id="scan-pattern-count">0</strong>
-                  <p>Code-level exploit patterns identified</p>
+                  <p>Code-level exploit patterns</p>
                 </article>
-                <article class="health-panel">
+                <article class="health-panel scan-stat-card">
                   <span>DEPENDENCY VULNS</span>
                   <strong id="scan-dep-count">0</strong>
-                  <p>Packages with known vulnerabilities</p>
+                  <p>Known vulnerabilities</p>
                 </article>
               </div>
 
-              <div class="evidence-grid">
-                <article class="panel">
+              <div class="scan-findings-container">
+                <article class="panel scan-findings-panel">
                   <header class="panel-header">
                     <div><p class="eyebrow">DETAILED FINDINGS</p><h2>Security findings</h2></div>
                   </header>

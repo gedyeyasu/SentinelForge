@@ -26,6 +26,7 @@ class Phase(StrEnum):
     PATTERN_SCAN = "pattern_scan"
     AUTH_ATTACK = "auth_attack"
     INJECTION_ATTACK = "injection_attack"
+    CUSTOM_EXPLOIT = "custom_exploit"
     HIDDENLAYER_SCAN = "hiddenlayer_scan"
     OPENSHELL_AUDIT = "openshell_audit"
     NIM_ANALYSIS = "nim_analysis"
@@ -43,6 +44,7 @@ PHASE_ORDER: list[Phase] = [
     Phase.PATTERN_SCAN,
     Phase.AUTH_ATTACK,
     Phase.INJECTION_ATTACK,
+    Phase.CUSTOM_EXPLOIT,
     Phase.HIDDENLAYER_SCAN,
     Phase.OPENSHELL_AUDIT,
     Phase.NIM_ANALYSIS,
@@ -60,6 +62,7 @@ PHASE_TO_PENTEST_PHASE: dict[Phase, PentestPhase] = {
     Phase.PATTERN_SCAN: PentestPhase.MAPPING,
     Phase.AUTH_ATTACK: PentestPhase.ATTACKING,
     Phase.INJECTION_ATTACK: PentestPhase.ATTACKING,
+    Phase.CUSTOM_EXPLOIT: PentestPhase.ATTACKING,
     Phase.HIDDENLAYER_SCAN: PentestPhase.ATTACKING,
     Phase.OPENSHELL_AUDIT: PentestPhase.ATTACKING,
     Phase.NIM_ANALYSIS: PentestPhase.ATTACKING,
@@ -75,8 +78,9 @@ _PHASE_NAMES: dict[Phase, str] = {
     Phase.MAPPING: "Mapping Attack Surface",
     Phase.DEPENDENCY_SCAN: "Scanning Dependencies",
     Phase.PATTERN_SCAN: "Scanning for Exploit Patterns",
-    Phase.AUTH_ATTACK: "Running Auth Attacks",
-    Phase.INJECTION_ATTACK: "Running Injection Attacks",
+    Phase.AUTH_ATTACK: "Running Auth Attacks (7 techniques)",
+    Phase.INJECTION_ATTACK: "Running Injection Attacks (Nemotron synthesis)",
+    Phase.CUSTOM_EXPLOIT: "Writing Custom Exploit (Agent-written Python)",
     Phase.HIDDENLAYER_SCAN: "HiddenLayer AI Scan",
     Phase.OPENSHELL_AUDIT: "OpenShell Audit",
     Phase.NIM_ANALYSIS: "NIM Threat Analysis",
@@ -153,6 +157,8 @@ class AgentOrchestrator:
             phases.append(Phase.AUTH_ATTACK)
         if config.run_injection_attacks:
             phases.append(Phase.INJECTION_ATTACK)
+        if config.run_custom_exploit:
+            phases.append(Phase.CUSTOM_EXPLOIT)
         if config.run_hiddenlayer_scan:
             phases.append(Phase.HIDDENLAYER_SCAN)
         if config.run_openshell_audit:

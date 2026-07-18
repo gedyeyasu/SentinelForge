@@ -152,6 +152,37 @@ agents:
       - max_lines_changed: 100
       - max_bytes_per_file: 102400
 
+  exploit_writer:
+    description: |
+      Custom exploit writer that PROVES pentest is not a toy. Writes a NEW Python exploit file from scratch
+      using Nemotron reasoning for each route, saves to .sentinelforge/exploits/{run_id}/, and executes it.
+      Dashboard shows file path, code preview, execution output live. Each exploit is novel per run, per route.
+    inputs:
+      - endpoint
+      - route_source
+      - owner_identity
+      - attacker_identity
+      - prior_payloads
+    allowed_tools:
+      - file_write_exploits
+      - payload_synthesizer
+      - nim_code_generator
+      - subprocess_python_exploit
+      - scoped_http_client
+    output: custom_python_exploit_file_plus_execution_receipt
+    model: nvidia/nemotron-3-super-120b-a12b
+    max_tokens: 6144
+    spawn_allowed: false
+    can_write_repo: false
+    write_scope:
+      - .sentinelforge/exploits/{run_id}/*.py
+      - max_files: 3
+      - max_bytes_per_file: 10240
+    budget:
+      max_requests_per_second: 1
+      max_total_requests: 50
+    proof: Writes Python file with httpx, BOLA logic, owner vs attacker compare, prints VULNERABLE/SECURE, saved as artifact with evidence hash
+
   adversarial_verifier:
     description: Mutates successful exploits (3+ safe mutations) and reruns against patched artifact
     inputs:
@@ -196,6 +227,7 @@ routing:
     - pattern_scan
     - auth_attack
     - injection_attack
+    - custom_exploit
     - hiddenlayer_scan
     - openshell_audit
     - nim_analysis

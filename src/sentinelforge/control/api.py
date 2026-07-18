@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import threading
 import time
+import uuid
 from pathlib import Path
 
 import httpx
@@ -36,6 +39,7 @@ from sentinelforge.control.service import DetectionRunService, RepositoryNotAuth
 from sentinelforge.control.storage import SQLiteRunStore
 from sentinelforge.detectors import DjangoBOLADetector, FastAPIBOLADetector
 from sentinelforge.environment import EnvironmentDetector
+from sentinelforge.event_bus import EventBus, LiveEvent
 from sentinelforge.integrations import RedHatAdvisory, RedHatSecurityDataClient
 from sentinelforge.integrations.github import GitHubClient
 from sentinelforge.ownership import OwnershipProver
@@ -45,6 +49,8 @@ from sentinelforge.pr_generator import PRGenerator
 from sentinelforge.scheduler import PentestScheduler
 from sentinelforge.scope import ScopeValidationError, load_scope
 from sentinelforge.verification import OwnershipVerificationService, VerificationMethod
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -136,7 +142,8 @@ def create_app(
         agents_path = Path("config/agents.yaml")
         if not agents_path.is_file():
             # fallback lookups
-            for p in [Path(__file__).parents[2] / "config" / "agents.yaml", Path("config/agents.yaml")]:
+            fallback = Path(__file__).parents[2] / "config" / "agents.yaml"
+            for p in [fallback, Path("config/agents.yaml")]:
                 if p.is_file():
                     agents_path = p
                     break
@@ -201,8 +208,13 @@ def create_app(
         return {
             "heartbeat_exists": hb_path.is_file(),
             "agents_exists": agents_path.is_file(),
-            "last_modified": hb_path.stat().st_mtime if hb_path.is_file() else None,
-            "content_preview": hb_path.read_text(encoding="utf-8")[:2000] if hb_path.is_file() else None,
+            "last_modified": (
+                hb_path.stat().st_mtime if hb_path.is_file() else None
+            ),
+            "content_preview": (
+                hb_path.read_text(encoding="utf-8")[:2000]
+                if hb_path.is_file() else None
+            ),
         }
 
     @app.get("/api/intelligence/redhat", response_model=list[RedHatAdvisory])
@@ -408,30 +420,173 @@ def create_app(
 
     # --- Source Code Scanning ---
 
-    @app.post("/api/scan")
-    def scan_repository(request: ScanRequest) -> dict[str, object]:
-        repo_path = Path(request.repository).resolve()
-        if not repo_path.is_dir():
-            raise HTTPException(status_code=400, detail=f"Not a directory: {repo_path}")
+    def _run_scan_background(
+        scan_id: str, repo_path: Path, bus
+    ) -> None:
+        """Run the full scan pipeline, emitting live events."""
+        def emit(phase, kind, payload):
+            bus.publish(LiveEvent(
+                run_id=scan_id, phase=phase, kind=kind,
+                timestamp=time.time(), payload=payload,
+            ))
+
+        emit("scan", "scan_started", {
+            "repository": str(repo_path),
+            "message": f"Starting security scan of {repo_path.name}",
+        })
 
         findings = []
-        findings.extend(FastAPIBOLADetector().scan(repo_path))
-        findings.extend(DjangoBOLADetector().scan(repo_path))
 
-        pattern_result = ExploitPatternScanner().scan_project(repo_path)
+        # Phase 1: BOLA Detection
+        emit("fastapi_bola", "agent_started", {
+            "agent": "FastAPIBOLADetector",
+            "message": "Scanning for FastAPI BOLA vulnerabilities",
+        })
+        try:
+            fastapi_findings = FastAPIBOLADetector().scan(repo_path)
+            findings.extend(fastapi_findings)
+            emit("fastapi_bola", "agent_completed", {
+                "agent": "FastAPIBOLADetector",
+                "message": f"FastAPI scan: {len(fastapi_findings)} findings in {repo_path.name}",
+                "finding_count": len(fastapi_findings),
+            })
+        except Exception as e:
+            emit("fastapi_bola", "agent_error", {
+                "agent": "FastAPIBOLADetector",
+                "message": f"FastAPI scan error: {e}",
+            })
 
+        emit("django_bola", "agent_started", {
+            "agent": "DjangoBOLADetector",
+            "message": "Scanning for Django BOLA vulnerabilities",
+        })
+        try:
+            django_findings = DjangoBOLADetector().scan(repo_path)
+            findings.extend(django_findings)
+            emit("django_bola", "agent_completed", {
+                "agent": "DjangoBOLADetector",
+                "message": f"Django scan: {len(django_findings)} findings",
+                "finding_count": len(django_findings),
+            })
+        except Exception as e:
+            emit("django_bola", "agent_error", {
+                "agent": "DjangoBOLADetector",
+                "message": f"Django scan error: {e}",
+            })
+
+        # Phase 2: Exploit Pattern Scan
+        emit("pattern_scan", "agent_started", {
+            "agent": "ExploitPatternScanner",
+            "message": "Scanning for code-level exploit patterns",
+        })
+
+        def pattern_progress(kind, payload):
+            if kind == "started":
+                msg = (
+                    f"Scanning {payload['total_files']} files "
+                    f"with {payload['patterns_per_file']} patterns"
+                )
+            elif kind == "finding":
+                msg = payload.get("description", "")
+            elif kind == "checking_file":
+                msg = f"Scanning {payload['file']}"
+            elif kind == "file_clean":
+                msg = (
+                    f"{payload['file']} clean "
+                    f"({payload['patterns_checked']} patterns)"
+                )
+            elif kind == "completed":
+                msg = (
+                    f"Pattern scan: {payload['finding_count']} findings "
+                    f"in {payload['files_scanned']} files "
+                    f"({payload['duration_ms']}ms)"
+                )
+            else:
+                msg = str(payload)
+            emit("pattern_scan", kind, {
+                "agent": "ExploitPatternScanner",
+                "message": msg,
+                **payload,
+            })
+
+        pattern_result = ExploitPatternScanner().scan_project(
+            repo_path, progress_callback=pattern_progress
+        )
+
+        # Phase 3: Dependency Analysis
         dep_vulns = []
         dep_warnings = []
+
+        emit("dependency_parse", "agent_started", {
+            "agent": "DependencyParser",
+            "message": "Parsing dependency manifests",
+        })
         try:
             parser = DependencyParser()
             manifest = parser.parse_project(repo_path)
+            dep_count = len(manifest.all_dependencies)
+            emit("dependency_parse", "agent_completed", {
+                "agent": "DependencyParser",
+                "message": f"Parsed {dep_count} dependencies from manifest files",
+                "dependency_count": dep_count,
+            })
+
+            emit("vuln_scan", "agent_started", {
+                "agent": "DependencyVulnerabilityScanner",
+                "message": "Cross-referencing dependencies with Red Hat advisories",
+            })
+
+            def vuln_progress(kind, payload):
+                if kind == "started":
+                    msg = (
+                        f"Checking {payload['unique_packages']} packages "
+                        f"against Red Hat advisories"
+                    )
+                elif kind == "checking_package":
+                    msg = (
+                        f"Checking {payload['package']} "
+                        f"{payload.get('version', '')}"
+                    )
+                elif kind == "vuln_found":
+                    msg = (
+                        f"Advisory {payload['advisory_id']}: "
+                        f"{payload['severity']} in {payload['package']}"
+                    )
+                elif kind == "package_complete":
+                    msg = (
+                        f"{payload['package']} complete: "
+                        f"{payload['advisories_checked']} advisories, "
+                        f"{payload['vulnerabilities']} vulns"
+                    )
+                elif kind == "completed":
+                    msg = (
+                        f"Dependency scan: "
+                        f"{payload['vulnerability_count']} vulns "
+                        f"in {payload['unique_packages']} packages"
+                    )
+                else:
+                    msg = str(payload)
+                emit("vuln_scan", kind, {
+                    "agent": "DependencyVulnerabilityScanner",
+                    "message": msg,
+                    **payload,
+                })
+
             scanner = DependencyVulnerabilityScanner()
-            scan_result = scanner.scan(manifest, repository_root=str(repo_path))
+            scan_result = scanner.scan(
+                manifest, repository_root=str(repo_path),
+                progress_callback=vuln_progress,
+            )
             dep_vulns = [v.to_dict() for v in scan_result.vulnerabilities]
         except Exception as error:
             dep_warnings.append(f"Dependency scan skipped: {error}")
+            emit("vuln_scan", "agent_error", {
+                "agent": "DependencyVulnerabilityScanner",
+                "message": f"Dependency scan error: {error}",
+            })
 
-        return {
+        # Final results
+        result = {
             "repository": str(repo_path),
             "bola_findings": [item.to_dict() for item in findings],
             "pattern_findings": pattern_result.to_dict(),
@@ -444,12 +599,82 @@ def create_app(
                 "total": len(findings) + len(pattern_result.findings) + len(dep_vulns),
             },
         }
+        emit("scan", "scan_completed", {
+            "result": result,
+            "message": f"Scan complete: {result['summary']['total']} findings",
+        })
+
+    @app.post("/api/scan")
+    def scan_repository(request: ScanRequest) -> dict[str, object]:
+        repo_path = Path(request.repository).resolve()
+        if not repo_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"Not a directory: {repo_path}")
+
+        scan_id = "sf_scan_" + uuid.uuid4().hex[:12]
+        bus = EventBus.instance()
+
+        thread = threading.Thread(
+            target=_run_scan_background,
+            args=(scan_id, repo_path, bus),
+            name=f"scan-{scan_id}",
+            daemon=True,
+        )
+        thread.start()
+        return {"scan_id": scan_id, "status": "started"}
+
+    @app.get("/api/scan/{scan_id}/stream")
+    async def stream_scan_events(scan_id: str):
+        bus = EventBus.instance()
+        queue = bus.subscribe(scan_id)
+
+        async def event_generator():
+            try:
+                while True:
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    except TimeoutError:
+                        yield f": keepalive {time.time()}\n\n"
+                        continue
+                    if event is None:
+                        break
+                    data = json.dumps({
+                        "phase": event.phase,
+                        "kind": event.kind,
+                        "timestamp": event.timestamp,
+                        "payload": event.payload,
+                    })
+                    yield f"data: {data}\n\n"
+                    if event.kind == "scan_completed":
+                        break
+            finally:
+                bus.unsubscribe(scan_id, queue)
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.get("/api/scan/{scan_id}")
+    def get_scan_result(scan_id: str) -> dict[str, object]:
+        bus = EventBus.instance()
+        log = bus.get_log(scan_id)
+        for event in reversed(log):
+            if event.kind == "scan_completed":
+                return event.payload.get("result", {})
+        raise HTTPException(status_code=404, detail="Scan not found or still running")
 
     @app.post("/api/scan/github")
     def scan_github_repo(request: GitHubScanRequest) -> dict[str, object]:
         client = GitHubClient()
         if not client.configured:
-            raise HTTPException(status_code=400, detail="GITHUB_TOKEN not configured")
+            raise HTTPException(
+                status_code=400, detail="GITHUB_TOKEN not configured"
+            )
 
         info = client.get_repo_info(request.owner, request.repo)
         if info is None:
@@ -465,38 +690,24 @@ def create_app(
                 branch=request.branch or None,
             )
         except Exception as error:
-            raise HTTPException(status_code=500, detail=f"Clone failed: {error}") from error
+            raise HTTPException(
+                status_code=500, detail=f"Clone failed: {error}"
+            ) from error
 
-        findings = []
-        findings.extend(FastAPIBOLADetector().scan(repo_dir))
-        findings.extend(DjangoBOLADetector().scan(repo_dir))
+        scan_id = "sf_scan_" + uuid.uuid4().hex[:12]
+        bus = EventBus.instance()
 
-        pattern_result = ExploitPatternScanner().scan(repo_dir)
-
-        dep_vulns = []
-        dep_warnings = []
-        try:
-            parser = DependencyParser()
-            manifest = parser.parse_project(repo_dir)
-            scanner = DependencyVulnerabilityScanner()
-            scan_result = scanner.scan(manifest, repository_root=str(repo_dir))
-            dep_vulns = [v.to_dict() for v in scan_result.vulnerabilities]
-        except Exception as error:
-            dep_warnings.append(f"Dependency scan skipped: {error}")
-
+        thread = threading.Thread(
+            target=_run_scan_background,
+            args=(scan_id, repo_dir, bus),
+            name=f"scan-{scan_id}",
+            daemon=True,
+        )
+        thread.start()
         return {
-            "repository": str(repo_dir),
+            "scan_id": scan_id,
+            "status": "started",
             "github_repo": f"{request.owner}/{request.repo}",
-            "bola_findings": [item.to_dict() for item in findings],
-            "pattern_findings": pattern_result.to_dict(),
-            "dependency_vulnerabilities": dep_vulns,
-            "warnings": dep_warnings,
-            "summary": {
-                "bola_count": len(findings),
-                "pattern_count": len(pattern_result.findings),
-                "dep_vuln_count": len(dep_vulns),
-                "total": len(findings) + len(pattern_result.findings) + len(dep_vulns),
-            },
         }
 
     # --- PR Generation ---

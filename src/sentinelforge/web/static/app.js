@@ -159,13 +159,19 @@ const eventDescriptions = {
   scope_validated: ["Scope validated", "Target boundaries enforced."],
   routes_discovered: ["Routes discovered", "API attack surface mapped."],
   exploit_attempted: ["Exploit attempted", "Attack agent probed a route."],
-  dependency_scan_completed: ["Dependency scan complete", "Red Hat advisory cross-reference finished."],
+  custom_exploit_started: ["Custom exploit writer started", "Agent is writing novel Python exploit from scratch using Nemotron."],
+  custom_exploit_written: ["Custom exploit written!", "Agent wrote new Python file to .sentinelforge/exploits/ - proves not a toy."],
+  custom_exploit_executed: ["Custom exploit executed", "Agent's Python exploit ran against staging - check output."],
+  dependency_scan_completed: ["Dependency scan complete", "Red Hat SBOM + VEX + reachability analysis finished."],
   pattern_scan_completed: ["Pattern scan complete", "Code-level exploit patterns identified."],
   hiddenlayer_safety_scan_completed: ["Safety scan complete", "HiddenLayer injection analysis finished."],
   phase_completed: ["Phase completed", "Orchestrator advanced to next phase."],
   orchestration_started: ["Orchestration started", "Long-running agent workflow initiated."],
   orchestration_completed: ["Orchestration completed", "All phases executed."],
   nim_threat_analysis_completed: ["NIM analysis complete", "Nemotron threat assessment finished."],
+  no_impact_evidence: ["No-impact evidence", "VEX: vulnerable code not in execute path."],
+  exploit_replayed_against_patch: ["Exploit replay blocked", "Mutated exploit blocked after patch - adversarial verification."],
+  openshell_audit_completed: ["OpenShell audit done", "Policy enforced, denied actions logged."],
 };
 
 function text(node, value) { node.textContent = value == null ? "—" : String(value); }
@@ -202,19 +208,113 @@ function setVerdict(panel, val, cap, verdict, kind) {
 function renderEvents(target, events) {
   target.replaceChildren();
   events.forEach((e, i) => {
-    const item = document.createElement("li"); item.className = "timeline-item";
+    const item = document.createElement("li"); 
+    item.className = "timeline-item";
+    if (e.kind === "custom_exploit_written") item.classList.add("highlight-exploit");
+    if (e.kind === "custom_exploit_executed") item.classList.add("highlight-execution");
+    if (e.kind === "exploit_replayed_against_patch") item.classList.add("highlight-blocked");
     const marker = document.createElement("span"); marker.className = "timeline-marker"; text(marker, String(i + 1).padStart(2, "0"));
     const content = document.createElement("div"); content.className = "timeline-content";
     const title = document.createElement("strong"); const desc = document.createElement("p");
     const labels = eventDescriptions[e.kind] || [e.kind, e.phase];
-    text(title, labels[0]); text(desc, `${labels[1]} · ${e.phase}`);
+    text(title, labels[0]); 
+    
+    // Enhanced description for custom exploit events
+    let description = `${labels[1]} · ${e.phase}`;
+    if (e.kind === "custom_exploit_written" && e.payload) {
+      description = `Agent wrote ${e.payload.file_path?.split('/').pop() || 'exploit.py'} for ${e.payload.route || ''} using ${e.payload.generated_by || 'nemotron'} (${e.payload.content_lines || 0} lines) - PROVES NOT A TOY`;
+    } else if (e.kind === "custom_exploit_executed" && e.payload) {
+      description = `Executed ${e.payload.file_path?.split('/').pop() || ''} -> ${e.payload.outcome || ''} - Output: ${(e.payload.execution_output_preview || '').slice(0,100)}`;
+    }
+    text(desc, description);
     content.append(title, desc);
+    
+    // Add file path badge for custom exploits
+    if (e.payload?.file_path) {
+      const fileBadge = document.createElement("code");
+      fileBadge.className = "exploit-file-badge";
+      fileBadge.textContent = e.payload.file_path;
+      content.append(fileBadge);
+    }
+    
     const time = document.createElement("time"); time.className = "timeline-time"; time.dateTime = e.occurred_at; text(time, formatTime(e.occurred_at));
     item.append(marker, content, time); target.append(item);
   });
 }
 
 // ===== SCAN =====
+const SCAN_ICONS = {
+  fastapi_bola: "🔓", django_bola: "🐍", pattern_scan: "🔍",
+  dependency_parse: "📦", vuln_scan: "🛡️", scan: "⚡",
+};
+
+let scanEventSource = null;
+
+function appendScanLogEntry(event) {
+  const log = document.querySelector("#scan-log");
+  if (!log) return;
+  const entry = document.createElement("div");
+  const kind = event.kind;
+  let cls = "scan-log-entry";
+  if (kind === "agent_started") cls += " log-started";
+  else if (kind === "agent_completed") cls += " log-completed";
+  else if (kind === "finding" || kind === "vuln_found") cls += " log-finding";
+  else if (kind === "agent_error") cls += " log-error";
+  else if (kind === "scan_completed") cls += " log-complete";
+  else if (kind === "checking_file") cls += " log-progress";
+  else if (kind === "checking_package") cls += " log-progress";
+  entry.className = cls;
+  const ts = new Date(event.timestamp * 1000).toLocaleTimeString();
+  const icon = SCAN_ICONS[event.phase] || "▸";
+  const msg = event.payload?.message || event.kind;
+  text(entry, `[${ts}] ${icon} ${msg}`);
+  log.prepend(entry);
+  while (log.children.length > 200) log.removeChild(log.lastChild);
+}
+
+function updateScanAgentStatus(event) {
+  const agents = document.querySelector("#scan-agent-activity");
+  if (!agents) return;
+  const phase = event.phase;
+  const kind = event.kind;
+  let row = agents.querySelector(`[data-phase="${phase}"]`);
+  if (!row) {
+    row = document.createElement("div");
+    row.className = "scan-agent-row";
+    row.dataset.phase = phase;
+    const icon = document.createElement("span");
+    icon.className = "scan-agent-icon";
+    icon.textContent = SCAN_ICONS[phase] || "▸";
+    const name = document.createElement("span");
+    name.className = "scan-agent-name";
+    text(name, event.payload?.agent || phase);
+    const detail = document.createElement("span");
+    detail.className = "scan-agent-detail";
+    const status = document.createElement("span");
+    status.className = "scan-agent-status";
+    row.append(icon, name, detail, status);
+    agents.append(row);
+  }
+  const detail = row.querySelector(".scan-agent-detail");
+  const status = row.querySelector(".scan-agent-status");
+  const msg = event.payload?.message || "";
+  text(detail, msg);
+
+  if (kind === "agent_started" || kind === "checking_file" || kind === "checking_package") {
+    row.classList.add("active");
+    row.classList.remove("done");
+    text(status, "running");
+  } else if (kind === "agent_completed") {
+    row.classList.remove("active");
+    row.classList.add("done");
+    text(status, "done");
+  } else if (kind === "agent_error") {
+    row.classList.remove("active");
+    row.classList.add("error");
+    text(status, "error");
+  }
+}
+
 function setupScanTabs() {
   document.querySelectorAll(".scan-tab").forEach(tab => {
     tab.addEventListener("click", () => {
@@ -229,22 +329,101 @@ function setupScanTabs() {
 
 async function runLocalScan(e) {
   e?.preventDefault(); clearError(ui.scanError);
+  if (scanEventSource) { scanEventSource.close(); scanEventSource = null; }
   ui.scanButton.disabled = true; ui.scanButton.querySelector("span").textContent = "Scanning…";
+  ui.scanEmpty.hidden = true;
+  document.querySelector("#scan-progress").hidden = false;
+  document.querySelector("#scan-agent-activity").replaceChildren();
+  document.querySelector("#scan-log").replaceChildren();
+
   try {
     const result = await api("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repository: ui.scanRepoInput.value.trim() }) });
-    renderScanResults(result);
-  } catch (err) { showError(ui.scanError, err.message); }
-  ui.scanButton.disabled = false; ui.scanButton.querySelector("span").textContent = "Start scan";
+    if (!result.scan_id) throw new Error("No scan_id returned");
+
+    // Connect SSE
+    scanEventSource = new EventSource(`/api/scan/${result.scan_id}/stream`);
+    scanEventSource.onmessage = async (e) => {
+      try {
+        const event = JSON.parse(e.data);
+        appendScanLogEntry(event);
+        updateScanAgentStatus(event);
+        if (event.kind === "scan_completed") {
+          scanEventSource.close();
+          scanEventSource = null;
+          // Fetch the full result
+          try {
+            const fullResult = await api(`/api/scan/${result.scan_id}`);
+            await new Promise(r => setTimeout(r, 400));
+            document.querySelector("#scan-progress").hidden = true;
+            renderScanResults(fullResult);
+          } catch {
+            document.querySelector("#scan-progress").hidden = true;
+            showError(ui.scanError, "Failed to fetch scan results");
+          }
+          ui.scanButton.disabled = false;
+          ui.scanButton.querySelector("span").textContent = "Start scan";
+        }
+      } catch {}
+    };
+    scanEventSource.onerror = () => {
+      scanEventSource.close();
+      scanEventSource = null;
+    };
+  } catch (err) {
+    document.querySelector("#scan-progress").hidden = true;
+    ui.scanEmpty.hidden = false;
+    showError(ui.scanError, err.message);
+    ui.scanButton.disabled = false;
+    ui.scanButton.querySelector("span").textContent = "Start scan";
+  }
 }
 
 async function runGithubScan(e) {
   e?.preventDefault(); clearError(ui.scanError);
+  if (scanEventSource) { scanEventSource.close(); scanEventSource = null; }
   ui.scanGithubButton.disabled = true; ui.scanGithubButton.querySelector("span").textContent = "Scanning…";
+  ui.scanEmpty.hidden = true;
+  document.querySelector("#scan-progress").hidden = false;
+  document.querySelector("#scan-agent-activity").replaceChildren();
+  document.querySelector("#scan-log").replaceChildren();
+
   try {
     const result = await api("/api/scan/github", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ owner: ui.scanGithubOwner.value.trim(), repo: ui.scanGithubRepo.value.trim() }) });
-    renderScanResults(result);
-  } catch (err) { showError(ui.scanError, err.message); }
-  ui.scanGithubButton.disabled = false; ui.scanGithubButton.querySelector("span").textContent = "Scan GitHub repo";
+    if (!result.scan_id) throw new Error("No scan_id returned");
+    scanEventSource = new EventSource(`/api/scan/${result.scan_id}/stream`);
+    scanEventSource.onmessage = async (e) => {
+      try {
+        const event = JSON.parse(e.data);
+        appendScanLogEntry(event);
+        updateScanAgentStatus(event);
+        if (event.kind === "scan_completed") {
+          scanEventSource.close();
+          scanEventSource = null;
+          try {
+            const fullResult = await api(`/api/scan/${result.scan_id}`);
+            await new Promise(r => setTimeout(r, 400));
+            document.querySelector("#scan-progress").hidden = true;
+            renderScanResults(fullResult);
+          } catch {
+            document.querySelector("#scan-progress").hidden = true;
+            showError(ui.scanError, "Failed to fetch scan results");
+          }
+          ui.scanGithubButton.disabled = false;
+          ui.scanGithubButton.querySelector("span").textContent = "Scan GitHub repo";
+        }
+      } catch {}
+    };
+    scanEventSource.onerror = () => {
+      scanEventSource.close();
+      scanEventSource = null;
+    };
+  } catch (err) {
+    document.querySelector("#scan-progress").hidden = true;
+    ui.scanEmpty.hidden = false;
+    showError(ui.scanError, err.message);
+    ui.scanGithubButton.disabled = false;
+    ui.scanGithubButton.querySelector("span").textContent = "Scan GitHub repo";
+  }
 }
 
 function renderScanResults(result) {
@@ -252,24 +431,57 @@ function renderScanResults(result) {
   ui.scanEmpty.hidden = true; ui.scanResults.hidden = false;
   text(ui.scanRepoName, basename(result.repository));
   const s = result.summary;
-  text(ui.scanBolaCount, s.bola_count); text(ui.scanPatternCount, s.pattern_count); text(ui.scanDepCount, s.dep_vuln_count);
+  text(ui.scanBolaCount, s.bola_count);
+  text(ui.scanPatternCount, s.pattern_count);
+  text(ui.scanDepCount, s.dep_vuln_count);
   ui.scanBolaCount.style.color = s.bola_count > 0 ? "var(--danger)" : "var(--safe)";
   ui.scanPatternCount.style.color = s.pattern_count > 0 ? "var(--warning)" : "var(--safe)";
 
   ui.scanFindingsList.replaceChildren();
   const allFindings = [...(result.bola_findings || []), ...(result.pattern_findings?.findings || [])];
-  if (!allFindings.length) { const empty = document.createElement("p"); text(empty, "No findings detected."); ui.scanFindingsList.append(empty); return; }
+  if (!allFindings.length) {
+    const empty = document.createElement("div");
+    empty.className = "scan-no-findings";
+    const icon = document.createElement("span");
+    icon.className = "scan-no-findings-icon";
+    icon.textContent = "✅";
+    const msg = document.createElement("p");
+    text(msg, "No vulnerabilities detected across all scan vectors.");
+    empty.append(icon, msg);
+    ui.scanFindingsList.append(empty);
+    return;
+  }
+
+  // Severity summary bar
+  const sevCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+  allFindings.forEach(f => { sevCounts[f.severity] = (sevCounts[f.severity] || 0) + 1; });
+  const summaryBar = document.createElement("div");
+  summaryBar.className = "scan-severity-summary";
+  Object.entries(sevCounts).forEach(([sev, count]) => {
+    if (count > 0) {
+      const pill = document.createElement("span");
+      pill.className = `severity-pill sev-${sev}`;
+      text(pill, `${count} ${sev.toUpperCase()}`);
+      summaryBar.append(pill);
+    }
+  });
+  ui.scanFindingsList.append(summaryBar);
 
   allFindings.forEach(f => {
     const row = document.createElement("div"); row.className = "finding-row";
-    const sev = document.createElement("span"); sev.className = `severity-badge sev-${f.severity}`; text(sev, f.severity?.toUpperCase() || "?");
+    const sev = document.createElement("span");
+    sev.className = `severity-badge sev-${f.severity}`;
+    text(sev, f.severity?.toUpperCase() || "?");
     const info = document.createElement("div"); info.className = "finding-info";
-    const title = document.createElement("strong"); text(title, f.title || f.vulnerability || "Finding");
-    const loc = document.createElement("code"); text(loc, `${f.path || f.file_path || ""}:${f.line || ""}`);
-    const desc = document.createElement("p"); text(desc, (f.description || "").slice(0, 120));
+    const title = document.createElement("strong");
+    text(title, f.title || f.vulnerability || "Finding");
+    const loc = document.createElement("code");
+    text(loc, `${f.path || f.file_path || ""}:${f.line || ""}`);
+    const desc = document.createElement("p"); text(desc, (f.description || "").slice(0, 200));
     info.append(title, loc, desc);
     if (f.severity === "critical" || f.severity === "high") {
-      const prBtn = document.createElement("button"); prBtn.className = "text-button"; text(prBtn, "Create PR");
+      const prBtn = document.createElement("button");
+      prBtn.className = "text-button"; text(prBtn, "Create PR");
       prBtn.addEventListener("click", () => { state.selectedFinding = f; ui.scanPrPanel.hidden = false; });
       row.append(sev, info, prBtn);
     } else { row.append(sev, info); }
@@ -329,13 +541,13 @@ async function createRun(e) {
 const PHASE_ICONS = {
   init: "⚡", ownership_verification: "🔑", environment_check: "🌍",
   scoping: "📋", mapping: "🗺️", dependency_scan: "📦",
-  pattern_scan: "🔍", attacking: "⚔️", nim_analysis: "🤖",
-  attestation: "📝", safety: "🛡️", openshell: "🔒", complete: "✅",
+  pattern_scan: "🔍", attacking: "⚔️", custom_exploit: "💻",
+  nim_analysis: "🤖", attestation: "📝", safety: "🛡️", openshell: "🔒", complete: "✅",
 };
 
 const PHASE_ORDER = [
   "init", "ownership_verification", "environment_check", "scoping",
-  "mapping", "dependency_scan", "pattern_scan", "attacking",
+  "mapping", "dependency_scan", "pattern_scan", "attacking", "custom_exploit",
   "nim_analysis", "attestation", "complete",
 ];
 
