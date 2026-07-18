@@ -18,13 +18,25 @@ class ScopedResponse:
 
 
 class ScopedHTTPClient:
-    def __init__(self, policy: PolicyEngine, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self, policy: PolicyEngine, client: httpx.Client | None = None, runtime_security: object | None = None
+    ) -> None:
         self._policy = policy
         self._client = client or httpx.Client(
             timeout=10,
             follow_redirects=False,
             headers={"User-Agent": "SentinelForge-AttackAgent/0.1"},
         )
+        # HiddenLayer Runtime Security Track 3: instrument tool calls and results
+        if runtime_security:
+            self._runtime = runtime_security
+        else:
+            try:
+                from sentinelforge.integrations.hiddenlayer_runtime import HiddenLayerRuntimeSecurity
+
+                self._runtime = HiddenLayerRuntimeSecurity()
+            except Exception:
+                self._runtime = None
 
     @property
     def policy(self) -> PolicyEngine:
@@ -38,6 +50,26 @@ class ScopedHTTPClient:
         headers: dict[str, str] | None = None,
         content: str | bytes | None = None,
     ) -> ScopedResponse:
+        # HiddenLayer Track 3: Evaluate tool call (HTTP request) before it enters runtime
+        if self._runtime:
+            try:
+                tool_check = self._runtime.evaluate_tool_call(
+                    "http_request",
+                    {"method": method, "url": url, "headers": headers, "content": str(content)[:2000] if content else ""},
+                    {"provider": "sentinelforge", "model": "http-agent"},
+                )
+                if tool_check.action == "block":
+                    # Block malicious tool call - thoughtful response per Track 3
+                    return ScopedResponse(
+                        status_code=0,
+                        headers={},
+                        body=f"Blocked by HiddenLayer runtime: {tool_check.signals}",
+                        duration_ms=0,
+                        policy_decision=self._policy.evaluate(method, url, destructive=False, dos_like=False),
+                    )
+            except Exception:
+                pass
+
         decision = self._policy.evaluate(
             method,
             url,
@@ -63,13 +95,35 @@ class ScopedHTTPClient:
             )
             duration_ms = int((time.monotonic() - started) * 1000)
             self._policy.record_request()
-            return ScopedResponse(
+            scoped_resp = ScopedResponse(
                 status_code=response.status_code,
                 headers=dict(response.headers),
                 body=response.text[:10_000],
                 duration_ms=duration_ms,
                 policy_decision=decision,
             )
+
+            # HiddenLayer Track 3: Evaluate tool result (HTTP response) - ingested content could contain prompt injection
+            if self._runtime:
+                try:
+                    result_check = self._runtime.evaluate_tool_result(
+                        "http_request",
+                        response.text[:5000],
+                        {"provider": "sentinelforge", "model": "http-agent"},
+                    )
+                    if result_check.verdict in ("malicious", "blocked"):
+                        # Quarantine malicious tool result - don't feed back to agent context
+                        scoped_resp = ScopedResponse(
+                            status_code=response.status_code,
+                            headers=dict(response.headers),
+                            body=f"[QUARANTINED by HiddenLayer: {result_check.signals}]",
+                            duration_ms=duration_ms,
+                            policy_decision=decision,
+                        )
+                except Exception:
+                    pass
+
+            return scoped_resp
         except httpx.HTTPError as error:
             duration_ms = int((time.monotonic() - started) * 1000)
             return ScopedResponse(

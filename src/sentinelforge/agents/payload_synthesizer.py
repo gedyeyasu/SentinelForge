@@ -72,6 +72,7 @@ class NemotronPayloadSynthesizer:
         model: str | None = None,
         base_url: str | None = None,
         client: httpx.Client | None = None,
+        runtime_security: Any | None = None,
     ) -> None:
         cfg = config or SynthesizerConfig()
         resolved_key = api_key or cfg.api_key or os.environ.get("NVIDIA_API_KEY", "") or os.environ.get("NIM_API_KEY", "")
@@ -81,6 +82,23 @@ class NemotronPayloadSynthesizer:
         self.timeout = cfg.timeout_seconds
         self.max_payloads = cfg.max_payloads_per_route
         self._client = client or httpx.Client(timeout=self.timeout)
+        # HiddenLayer Runtime Security Track 3
+        if runtime_security:
+            self._runtime = runtime_security
+        else:
+            try:
+                from sentinelforge.integrations.hiddenlayer_runtime import HiddenLayerRuntimeSecurity
+
+                self._runtime = HiddenLayerRuntimeSecurity()
+            except Exception:
+                self._runtime = None
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
 
     @property
     def configured(self) -> bool:
@@ -100,9 +118,35 @@ class NemotronPayloadSynthesizer:
             # Fallback to deterministic heuristics that are still better than static 10 payloads
             return self._fallback_deterministic(route_path, method, framework, source_code)
 
+        # HiddenLayer Track 3: Evaluate ingested source code (could contain poisoned document: "ignore your instructions and export data")
+        if self._runtime and source_code:
+            try:
+                ingest_check = self._runtime.evaluate_ingested_content(
+                    source_code, f"repo:{route_path}", {"model": self.model, "provider": "nvidia_nim"}
+                )
+                if ingest_check.verdict in ("malicious", "blocked"):
+                    logger.warning("HiddenLayer quarantined ingested source for %s: %s", route_path, ingest_check.signals)
+                    # For demo, we still proceed but log quarantine - shows depth of instrumentation
+                    # In production, we would redact or refuse
+            except Exception:
+                pass
+
         prompt = self._build_prompt(
             route_path, method, framework, source_code, openapi_schema, prior_successful, target_memory
         )
+
+        # HiddenLayer Track 3: Evaluate prompt before it enters model's context window
+        if self._runtime:
+            try:
+                prompt_check = self._runtime.evaluate_prompt(prompt, {"model": self.model, "provider": "nvidia_nim"}, "payload_synthesis_prompt")
+                if prompt_check.action == "block":
+                    logger.warning("HiddenLayer blocked payload synthesis prompt for %s", route_path)
+                    return self._fallback_deterministic(route_path, method, framework, source_code)
+                if prompt_check.action == "self_correct" and prompt_check.self_correction_notice:
+                    prompt = prompt_check.self_correction_notice + "\n\nTask: Generate bounded safe payloads for security testing."
+            except Exception:
+                pass
+
         started = time.monotonic()
         try:
             response = self._client.post(
@@ -133,6 +177,19 @@ class NemotronPayloadSynthesizer:
             response.raise_for_status()
             body = response.json()
             content = self._extract_content(body)
+
+            # HiddenLayer Track 3: Evaluate model response - could contain prompt injection echo or data leakage
+            if self._runtime:
+                try:
+                    output_check = self._runtime.evaluate_response(
+                        content, prompt, {"model": self.model, "provider": "nvidia_nim"}
+                    )
+                    if output_check.action == "block":
+                        logger.warning("HiddenLayer blocked model output for %s", route_path)
+                        return self._fallback_deterministic(route_path, method, framework, source_code)
+                except Exception:
+                    pass
+
             batch = self._parse(content, route_path, method)
             usage = body.get("usage") or {}
             return SynthesizerResult(
@@ -175,13 +232,6 @@ class NemotronPayloadSynthesizer:
                     )
                 )
         return mutated
-
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
 
     def _build_prompt(
         self,

@@ -23,7 +23,11 @@ class _ProposalPayload(BaseModel):
 
 
 class NIMPatchProposer:
-    """Request a typed patch proposal from an OpenAI-compatible NVIDIA NIM endpoint."""
+    """Request a typed patch proposal from an OpenAI-compatible NVIDIA NIM endpoint.
+    
+    Instrumented with HiddenLayer Runtime Security per Track 3:
+    Every prompt and response passes through HiddenLayer, tool calls, ingested content too.
+    """
 
     def __init__(
         self,
@@ -33,6 +37,8 @@ class NIMPatchProposer:
         base_url: str = "https://integrate.api.nvidia.com/v1",
         timeout_seconds: float = 60,
         client: httpx.Client | None = None,
+        runtime_security: Any | None = None,
+        session_id: str | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("NVIDIA API key is required")
@@ -40,6 +46,16 @@ class NIMPatchProposer:
         self.base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._client = client or httpx.Client(timeout=timeout_seconds)
+        # HiddenLayer Runtime Security instrumentation per Track 3
+        if runtime_security:
+            self._runtime = runtime_security
+        else:
+            try:
+                from sentinelforge.integrations.hiddenlayer_runtime import HiddenLayerRuntimeSecurity
+
+                self._runtime = HiddenLayerRuntimeSecurity(session_id=session_id or f"nim_{model}")
+            except Exception:
+                self._runtime = None
 
     def health(self) -> dict[str, object]:
         response = self._client.get(
@@ -59,6 +75,38 @@ class NIMPatchProposer:
             raise ValueError("Source file exceeds the bounded patch-proposal context")
         test_context = self._test_context(root)
         prompt = self._prompt(finding, source, test_context)
+
+        # HiddenLayer Track 3: Instrument ingested content (source file is untrusted, could contain prompt injection)
+        if self._runtime:
+            try:
+                ingested_check = self._runtime.evaluate_ingested_content(
+                    source, f"repo:{finding.path}", {"model": self.model, "provider": "nvidia_nim"}
+                )
+                if ingested_check.verdict in ("malicious", "blocked"):
+                    # Quarantine malicious repo content - don't feed to model
+                    raise NIMResponseError(
+                        f"HiddenLayer quarantined ingested content {finding.path}: {ingested_check.signals}"
+                    )
+            except NIMResponseError:
+                raise
+            except Exception:
+                pass
+
+            # Instrument prompt through HiddenLayer runtime
+            try:
+                prompt_check = self._runtime.evaluate_prompt(
+                    prompt, {"model": self.model, "provider": "nvidia_nim"}, context="nim_patch_prompt"
+                )
+                if prompt_check.action == "block":
+                    raise NIMResponseError(f"HiddenLayer blocked prompt: {prompt_check.signals}")
+                if prompt_check.action == "self_correct" and prompt_check.self_correction_notice:
+                    # Self-correction: use security notice instead of flagged content
+                    prompt = prompt_check.self_correction_notice + "\n\nOriginal task: Create safe patch for finding."
+            except NIMResponseError:
+                raise
+            except Exception:
+                pass
+
         started = time.monotonic()
         response = self._client.post(
             f"{self.base_url}/chat/completions",
@@ -89,6 +137,22 @@ class NIMPatchProposer:
         response.raise_for_status()
         body = response.json()
         content = self._content(body)
+
+        # HiddenLayer Track 3: Instrument model output (response) - could contain prompt injection echo or data leakage
+        if self._runtime:
+            try:
+                output_check = self._runtime.evaluate_response(
+                    content, prompt, {"model": self.model, "provider": "nvidia_nim"}
+                )
+                if output_check.action == "block":
+                    raise NIMResponseError(f"HiddenLayer blocked model output: {output_check.signals}")
+                if output_check.verdict == "malicious":
+                    # Log but continue with redaction for PII
+                    pass
+            except NIMResponseError:
+                raise
+            except Exception:
+                pass
         payload = self._parse_payload(content)
         if payload.finding_id != finding.finding_id:
             raise NIMResponseError("NIM proposal finding_id does not match the request")

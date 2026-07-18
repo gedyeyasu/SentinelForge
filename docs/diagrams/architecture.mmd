@@ -1,0 +1,65 @@
+graph TD
+    A[Developer PR<br/>AI-generated code] --> B[SENTINELFORGE Release Gate<br/>Proof-carrying security]
+
+    B --> C[Scope Validation<br/>OpenShell Policy<br/>deny-by-default<br/>allowed_hosts, rate 3rps, kill-switch]
+    C --> D[Route Discovery<br/>OpenAPI + AST FastAPI/Django]
+    D --> E[SBOM Parser<br/>CycloneDX/SPDX<br/>+ DependencyParser]
+    E --> F[Red Hat CSAF/OVAL/VEX<br/>Reachability Call-Graph<br/>No-impact evidence]
+    F --> G[Pattern Scanner<br/>18 Regex]
+
+    G --> H[HiddenLayer Runtime Security Track 3<br/>SDK v2 evaluate_interaction<br/>Prompts, Responses, Tool Calls,<br/>Tool Results, Ingested Content<br/>Self-correction + Quarantine]
+
+    H --> I{Attack Agents<br/>3 specialized + Custom Writer}
+    I --> J[Auth Attacker<br/>7 techniques<br/>ID enum, JWT swap, header injection<br/>verb tamper, param pollution]
+    I --> K[Injection Attacker<br/>10 static + 10 Nemotron synthetic<br/>+ 3 mutations]
+    I --> L[Custom Exploit Writer<br/>Writes NEW Python file per run<br/>Nemotron code gen<br/>Executes via sys.executable<br/>PROOF NOT TOY]
+
+    J --> M[ExploitReceipt<br/>8 fields per PLAN 7.3<br/>Replay curl, evidence_hash]
+    K --> M
+    L --> M
+
+    M --> N[Finding Validator<br/>Replay check<br/>HiddenLayer verdict]
+
+    N --> O{Confirmed?}
+    O -->|No| P[ATTESTED SAFE<br/>Signed Attestation]
+    O -->|Yes| Q[Patch Engineer<br/>Deterministic + Nemotron<br/>via NIM/vLLM]
+    
+    Q --> R[Adversarial Verifier<br/>3 mutations must fail<br/>after patch per PLAN 7.4]
+
+    R --> S{All Blocked?}
+    S -->|No| Q
+    S -->|Yes| T[Release Auditor<br/>Signed Attestation<br/>HMAC Hash Chain + VEX + SARIF]
+
+    T --> U[GitHub PR<br/>Secure clone askpass<br/>Check Runs annotation<br/>SARIF upload]
+
+    U --> V[Human Approval Gate<br/>No auto-merge<br/>per Safety Boundary]
+
+    V --> W[Deploy SAFE<br/>or BLOCKED with proof]
+
+    subgraph Tech Stack
+        T1[Python 3.12<br/>FastAPI + Uvicorn<br/>SQLite / Supabase Postgres RLS]
+        T2[httpx MockTransport<br/>Pydantic<br/>Packaging]
+        T3[Vanilla JS SPA<br/>Instrument Sans + IBM Plex Mono<br/>Forensic Dark Theme]
+    end
+
+    subgraph Hackathon Tools Deep Integration
+        H1[NVIDIA Nemotron<br/>Payload Synth + Threat + Patch + Exploit Code Gen<br/>Token trace per agent]
+        H2[NVIDIA NIM<br/>Hosted health check<br/>Fallback to vLLM]
+        H3[vLLM<br/>Local perf<br/>Bench 5.2x speedup<br/>bench.json]
+        H4[Brev<br/>GPU manifest A10G/L4<br/>Docker Compose]
+        H5[NemoClaw<br/>agents.yaml 11 agents<br/>HEARTBEAT.md learning delta<br/>target_memory]
+        H6[OpenShell<br/>openshell-policy.yaml<br/>10 rules deny-by-default<br/>Denied visible]
+        H7[Red Hat<br/>CSAF+OVAL+VEX+SBOM<br/>Reachability + cursor dedup]
+        H8[HiddenLayer Track 3<br/>Runtime v2 SDK<br/>Prompts/Responses/ToolCalls/Results/Ingested<br/>Signals: prompt_injection, pii, code, dos, url<br/>SELF_CORRECT, QUARANTINE, BLOCK]
+        H9[GitHub<br/>Secure clone + Check Runs + SARIF + PR<br/>Secret redaction gate]
+    end
+
+    Q -.-> H1
+    Q -.-> H2
+    Q -.-> H3
+    B -.-> H4
+    B -.-> H5
+    C -.-> H6
+    F -.-> H7
+    H -.-> H8
+    U -.-> H9
