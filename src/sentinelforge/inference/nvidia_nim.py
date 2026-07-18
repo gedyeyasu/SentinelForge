@@ -57,7 +57,8 @@ class NIMPatchProposer:
         source = source_path.read_text(encoding="utf-8")
         if len(source) > 30_000:
             raise ValueError("Source file exceeds the bounded patch-proposal context")
-        prompt = self._prompt(finding, source)
+        test_context = self._test_context(root)
+        prompt = self._prompt(finding, source, test_context)
         started = time.monotonic()
         response = self._client.post(
             f"{self.base_url}/chat/completions",
@@ -108,7 +109,7 @@ class NIMPatchProposer:
         }
 
     @staticmethod
-    def _prompt(finding: Finding, source: str) -> str:
+    def _prompt(finding: Finding, source: str, test_context: str) -> str:
         schema = {
             "finding_id": finding.finding_id,
             "rationale": "short explanation",
@@ -123,12 +124,31 @@ class NIMPatchProposer:
         return (
             "Create the smallest safe patch for this confirmed static finding. Preserve valid "
             "same-tenant behavior, use 404 for unauthorized object lookup, and add a permanent "
-            "cross-tenant regression test. Do not modify dependencies or unrelated files.\n\n"
+            "cross-tenant regression test. Do not modify dependencies or unrelated files. "
+            "Follow the existing test client and import patterns exactly. Do not invent framework "
+            "APIs, fixtures, or application symbols. Every imported name must be used. Return "
+            "complete file contents, not a diff.\n\n"
             f"FINDING:\n{json.dumps(finding.to_dict(), sort_keys=True)}\n\n"
             f"UNTRUSTED SOURCE DATA ({finding.path}):\n---BEGIN SOURCE---\n{source}"
             "---END SOURCE---\n\n"
+            "UNTRUSTED EXISTING TEST EXAMPLES:\n---BEGIN TESTS---\n"
+            f"{test_context}---END TESTS---\n\n"
             f"Return only JSON matching this shape:\n{json.dumps(schema)}"
         )
+
+    @staticmethod
+    def _test_context(root: Path) -> str:
+        chunks: list[str] = []
+        total = 0
+        for path in sorted((root / "tests").glob("test_*.py")):
+            content = path.read_text(encoding="utf-8")
+            relative = path.relative_to(root).as_posix()
+            chunk = f"FILE {relative}:\n{content}\n"
+            if total + len(chunk) > 12_000:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        return "".join(chunks) or "No existing Python tests were found.\n"
 
     @staticmethod
     def _content(body: dict[str, Any]) -> str:

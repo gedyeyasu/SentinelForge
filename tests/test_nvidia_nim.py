@@ -19,6 +19,8 @@ def test_nim_patch_proposer_uses_openai_compatible_contract() -> None:
         body = json.loads(request.content)
         assert body["model"] == "nvidia/nemotron-3-super-120b-a12b"
         assert finding.finding_id in body["messages"][1]["content"]
+        assert "UNTRUSTED EXISTING TEST EXAMPLES" in body["messages"][1]["content"]
+        assert "TestClient(app)" in body["messages"][1]["content"]
         proposal = {
             "finding_id": finding.finding_id,
             "rationale": "Enforce the tenant invariant before returning the order.",

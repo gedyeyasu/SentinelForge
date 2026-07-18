@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+from sentinelforge.config import resolve_nvidia_config
 from sentinelforge.detectors import FastAPIBOLADetector
 from sentinelforge.inference import NIMPatchProposer
 from sentinelforge.remediation import (
@@ -128,11 +128,14 @@ def nim_remediate_command(args: argparse.Namespace) -> int:
 
 
 def _nim_proposer(args: argparse.Namespace) -> NIMPatchProposer:
-    api_key = os.environ.get("NVIDIA_API_KEY", "")
-    if not api_key:
-        raise SystemExit("NVIDIA_API_KEY is required; it is never stored or printed")
+    config = resolve_nvidia_config()
+    if not config.configured:
+        raise SystemExit(
+            "NVIDIA_API_KEY (or NVIDIA_INFERENCE_API_KEY) is required; "
+            "it is never stored or printed"
+        )
     return NIMPatchProposer(
-        api_key=api_key,
+        api_key=config.api_key,
         model=args.model,
         base_url=args.base_url,
         timeout_seconds=args.timeout,
@@ -140,6 +143,7 @@ def _nim_proposer(args: argparse.Namespace) -> NIMPatchProposer:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    nvidia = resolve_nvidia_config()
     parser = argparse.ArgumentParser(prog="sentinelforge")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -160,11 +164,11 @@ def build_parser() -> argparse.ArgumentParser:
     nim_health = subparsers.add_parser("nim-health", help="Check the configured NVIDIA model")
     nim_health.add_argument(
         "--base-url",
-        default=os.environ.get("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"),
+        default=nvidia.base_url,
     )
     nim_health.add_argument(
         "--model",
-        default=os.environ.get("NIM_MODEL", "nvidia/nemotron-3-super-120b-a12b"),
+        default=nvidia.model,
     )
     nim_health.add_argument("--timeout", type=int, default=30)
     nim_health.set_defaults(handler=nim_health_command)
@@ -177,11 +181,11 @@ def build_parser() -> argparse.ArgumentParser:
     nim_remediate.add_argument("--run-root", default=".sentinelforge/nim-runs")
     nim_remediate.add_argument(
         "--base-url",
-        default=os.environ.get("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"),
+        default=nvidia.base_url,
     )
     nim_remediate.add_argument(
         "--model",
-        default=os.environ.get("NIM_MODEL", "nvidia/nemotron-3-super-120b-a12b"),
+        default=nvidia.model,
     )
     nim_remediate.add_argument("--timeout", type=int, default=90)
     nim_remediate.set_defaults(handler=nim_remediate_command)

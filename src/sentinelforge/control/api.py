@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from sentinelforge.config import resolve_nvidia_config
 from sentinelforge.control.models import DetectionRunRequest, RunEvent, RunRecord
 from sentinelforge.control.service import DetectionRunService, RepositoryNotAuthorizedError
 from sentinelforge.control.storage import SQLiteRunStore
@@ -39,11 +40,12 @@ def create_app(
 
     @app.get("/api/integrations")
     def integrations() -> dict[str, dict[str, object]]:
+        nvidia = resolve_nvidia_config()
         return {
             "deterministic": {"status": "active"},
             "nvidia_nim": {
-                "status": "configured" if os.environ.get("NVIDIA_API_KEY") else "awaiting_key",
-                "model": os.environ.get("NIM_MODEL", "nvidia/nemotron-3-super-120b-a12b"),
+                "status": "configured" if nvidia.configured else "awaiting_key",
+                "model": nvidia.model,
             },
             "red_hat_security_data": {"status": "public_api"},
             "hiddenlayer": {
