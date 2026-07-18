@@ -331,7 +331,294 @@ function setupScanTabs() {
       const isGithub = tab.dataset.tab === "github";
       ui.scanLocalForm.hidden = isGithub;
       ui.scanGithubForm.hidden = !isGithub;
+      if (isGithub) {
+        // Auto-load GitHub repos when switching to GitHub tab
+        checkGithubOAuthStatus();
+        loadGithubReposList();
+      }
     });
+  });
+}
+
+// ===== GITHUB OAUTH + REPO LISTING =====
+async function checkGithubOAuthStatus() {
+  const statusEl = document.querySelector("#github-oauth-status") || document.querySelector("#settings-github-oauth-status");
+  const configEl = document.querySelector("#settings-github-oauth-config");
+  try {
+    const status = await api("/api/github/status");
+    const oauthConfig = await api("/api/github/oauth/config").catch(() => ({configured:false}));
+    
+    const isAuth = status.status === "authenticated";
+    const login = status.login || "GitHub User";
+    
+    if (statusEl) {
+      if (isAuth) {
+        statusEl.innerHTML = `✅ Connected as <strong>${login}</strong> (via ${status.source || 'token'}) - Ready to list repos`;
+        statusEl.style.color = "var(--safe)";
+      } else {
+        statusEl.textContent = `Not connected: ${status.message || 'Set GITHUB_TOKEN or connect via OAuth'}`;
+        statusEl.style.color = "var(--muted)";
+      }
+    }
+    
+    if (configEl) {
+      if (oauthConfig.configured) {
+        configEl.textContent = `OAuth App configured: ${oauthConfig.client_id} | Callback: ${oauthConfig.callback_url} | Token: ${oauthConfig.has_token ? 'Stored securely' : 'Not yet'}`;
+      } else {
+        configEl.innerHTML = `OAuth not configured. To enable super cool OAuth:<br/>
+        1. Go to <a href="https://github.com/settings/developers" target="_blank" style="color:var(--info)">github.com/settings/developers</a> → OAuth Apps → New OAuth App<br/>
+        2. Set Authorization callback URL to <code>http://localhost:8741/api/github/oauth/callback</code><br/>
+        3. Add to .env: <code>GITHUB_CLIENT_ID=xxx</code> and <code>GITHUB_CLIENT_SECRET=yyy</code><br/>
+        4. Restart API and click Connect again<br/>
+        <em>Or just use GITHUB_TOKEN in .env for manual flow.</em>`;
+      }
+    }
+    
+    // Update repo list if authenticated
+    if (isAuth) {
+      const container = document.querySelector("#github-repos-list-container");
+      if (container) container.hidden = false;
+    }
+    
+    return status;
+  } catch (err) {
+    if (statusEl) {
+      statusEl.textContent = `GitHub status check failed: ${err.message}`;
+      statusEl.style.color = "var(--blocked)";
+    }
+    return null;
+  }
+}
+
+async function startGithubOAuth() {
+  try {
+    const result = await api("/api/github/oauth/start");
+    if (result.authorize_url) {
+      // Open popup for OAuth
+      const width = 600, height = 700;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      const popup = window.open(result.authorize_url, "github_oauth", `width=${width},height=${height},left=${left},top=${top},popup=1`);
+      
+      if (!popup) {
+        // Fallback: redirect current window
+        window.location.href = result.authorize_url;
+        return;
+      }
+      
+      // Poll for popup close
+      const checkPopup = setInterval(async () => {
+        if (popup.closed) {
+          clearInterval(checkPopup);
+          // Check if auth succeeded
+          setTimeout(async () => {
+            await checkGithubOAuthStatus();
+            await checkIntegrations();
+            await loadGithubReposList();
+          }, 1000);
+        }
+      }, 500);
+      
+      // Listen for postMessage from callback
+      const messageHandler = (event) => {
+        if (event.data && event.data.type === "github_oauth_success") {
+          window.removeEventListener("message", messageHandler);
+          clearInterval(checkPopup);
+          if (popup && !popup.closed) popup.close();
+          checkGithubOAuthStatus();
+          checkIntegrations();
+          loadGithubReposList();
+        }
+      };
+      window.addEventListener("message", messageHandler);
+      
+      // Timeout after 5 minutes
+      setTimeout(() => {
+        clearInterval(checkPopup);
+        window.removeEventListener("message", messageHandler);
+      }, 300000);
+    }
+  } catch (err) {
+    alert(`GitHub OAuth start failed: ${err.message}\n\nMake sure GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are set in .env.\nSee docs/GITHUB_OAUTH.md for setup.`);
+  }
+}
+
+async function disconnectGithub() {
+  if (!confirm("Disconnect GitHub? This will delete the stored OAuth token in .sentinelforge/github_token.json")) return;
+  try {
+    await api("/api/github/oauth/disconnect", {method: "POST"});
+    alert("GitHub disconnected. Token deleted.");
+    checkGithubOAuthStatus();
+    checkIntegrations();
+    const container = document.querySelector("#github-repos-list-container");
+    if (container) container.hidden = true;
+    document.querySelector("#github-repos-list")?.replaceChildren();
+  } catch (err) {
+    alert(`Disconnect failed: ${err.message}`);
+  }
+}
+
+async function loadGithubReposList() {
+  const listEl = document.querySelector("#github-repos-list");
+  const container = document.querySelector("#github-repos-list-container");
+  const previewEl = document.querySelector("#settings-github-repos-preview");
+  
+  if (!listEl && !previewEl) return;
+  
+  try {
+    const data = await api("/api/github/repos?limit=30&sort=updated");
+    const repos = data.repos || [];
+    
+    // Render in scan tab list
+    if (listEl) {
+      listEl.replaceChildren();
+      if (repos.length === 0) {
+        const empty = document.createElement("li");
+        empty.style.padding = "0.75rem";
+        empty.style.color = "var(--muted)";
+        empty.style.fontSize = "12px";
+        empty.textContent = "No repos found. Check your GitHub token scopes include repo,read:org.";
+        listEl.append(empty);
+      } else {
+        repos.forEach(repo => {
+          const li = document.createElement("li");
+          li.style.cssText = "padding:0.5rem 0.75rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; cursor:pointer; hover:background:var(--panel-raised)";
+          li.addEventListener("mouseenter", () => li.style.background = "var(--panel-raised)");
+          li.addEventListener("mouseleave", () => li.style.background = "transparent");
+          
+          const info = document.createElement("div");
+          info.style.flex = "1";
+          const name = document.createElement("strong");
+          name.style.fontSize = "13px";
+          name.textContent = repo.full_name;
+          if (repo.private) {
+            name.textContent += " 🔒";
+            name.title = "Private repo";
+          }
+          const desc = document.createElement("div");
+          desc.style.fontSize = "11px";
+          desc.style.color = "var(--muted)";
+          desc.textContent = `${repo.description?.slice(0,80) || 'No description'} • ${repo.language || 'Unknown'} • ${repo.default_branch}`;
+          
+          info.append(name, desc);
+          
+          const actions = document.createElement("div");
+          actions.style.display = "flex";
+          actions.style.gap = "0.25rem";
+          
+          const scanBtn = document.createElement("button");
+          scanBtn.className = "secondary-button";
+          scanBtn.style.fontSize = "11px";
+          scanBtn.style.padding = "2px 8px";
+          scanBtn.textContent = "Scan";
+          scanBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            // Auto-fill owner/repo inputs and trigger scan
+            const parts = repo.full_name.split("/");
+            if (parts.length === 2) {
+              document.querySelector("#scan-github-owner").value = parts[0];
+              document.querySelector("#scan-github-repo").value = parts[1];
+              // Scroll to form
+              document.querySelector("#scan-github-form")?.scrollIntoView({behavior:"smooth"});
+            }
+          });
+          
+          const viewBtn = document.createElement("a");
+          viewBtn.href = repo.url;
+          viewBtn.target = "_blank";
+          viewBtn.textContent = "View";
+          viewBtn.style.fontSize = "11px";
+          viewBtn.style.padding = "2px 8px";
+          viewBtn.style.textDecoration = "none";
+          viewBtn.style.color = "var(--info)";
+          
+          actions.append(scanBtn, viewBtn);
+          li.append(info, actions);
+          
+          // Click row auto-fills
+          li.addEventListener("click", () => {
+            const parts = repo.full_name.split("/");
+            if (parts.length === 2) {
+              document.querySelector("#scan-github-owner").value = parts[0];
+              document.querySelector("#scan-github-repo").value = parts[1];
+            }
+          });
+          
+          listEl.append(li);
+        });
+      }
+      if (container) container.hidden = false;
+    }
+    
+    // Render preview in settings
+    if (previewEl) {
+      previewEl.replaceChildren();
+      previewEl.hidden = false;
+      if (repos.length === 0) {
+        previewEl.textContent = "No repos found.";
+      } else {
+        const title = document.createElement("div");
+        title.style.fontSize = "12px";
+        title.style.fontWeight = "600";
+        title.style.marginBottom = "0.5rem";
+        title.textContent = `Your Repos (${repos.length} shown, ${data.total} total) - Click Scan in Scan tab to test`;
+        previewEl.append(title);
+        repos.slice(0,5).forEach(repo => {
+          const div = document.createElement("div");
+          div.style.fontSize = "11px";
+          div.style.padding = "2px 0";
+          div.style.borderBottom = "1px solid var(--border)";
+          div.textContent = `${repo.full_name} ${repo.private ? '🔒' : ''} - ${repo.language || ''}`;
+          previewEl.append(div);
+        });
+      }
+    }
+    
+  } catch (err) {
+    // If not configured, hide list and show message
+    if (listEl) {
+      listEl.replaceChildren();
+      const msg = document.createElement("li");
+      msg.style.padding = "0.75rem";
+      msg.style.color = "var(--warning)";
+      msg.style.fontSize = "12px";
+      msg.textContent = `GitHub not connected: ${err.message}. Connect via OAuth or set GITHUB_TOKEN in .env`;
+      listEl.append(msg);
+    }
+    console.log("Failed to load GitHub repos:", err.message);
+  }
+}
+
+function setupGithubSearch() {
+  const searchInput = document.querySelector("#github-repos-search");
+  if (!searchInput) return;
+  searchInput.addEventListener("input", async (e) => {
+    const query = e.target.value.trim();
+    if (query.length < 2) {
+      loadGithubReposList();
+      return;
+    }
+    try {
+      const data = await api(`/api/github/repos?limit=30&search=${encodeURIComponent(query)}`);
+      const listEl = document.querySelector("#github-repos-list");
+      if (!listEl) return;
+      listEl.replaceChildren();
+      (data.repos || []).forEach(repo => {
+        const li = document.createElement("li");
+        li.style.padding = "0.5rem 0.75rem";
+        li.style.borderBottom = "1px solid var(--border)";
+        li.textContent = repo.full_name;
+        li.style.cursor = "pointer";
+        li.addEventListener("click", () => {
+          const parts = repo.full_name.split("/");
+          if (parts.length === 2) {
+            document.querySelector("#scan-github-owner").value = parts[0];
+            document.querySelector("#scan-github-repo").value = parts[1];
+          }
+        });
+        listEl.append(li);
+      });
+    } catch {}
   });
 }
 
@@ -967,6 +1254,7 @@ function initialize() {
   document.querySelectorAll(".rail-nav .nav-item[data-view]").forEach(i => i.addEventListener("click", e => { e.preventDefault(); switchView(i.dataset.view); }));
 
   setupScanTabs();
+  setupGithubSearch();
   ui.scanLocalForm.addEventListener("submit", runLocalScan);
   ui.scanGithubForm.addEventListener("submit", runGithubScan);
   ui.scanCreatePr.addEventListener("click", createPRFromScan);
@@ -989,7 +1277,20 @@ function initialize() {
 
   ui.cicdForm.addEventListener("submit", generateCICD);
 
+  // GitHub OAuth buttons
+  const oauthBtns = document.querySelectorAll("#github-oauth-connect-btn, #settings-github-oauth-btn");
+  oauthBtns.forEach(btn => {
+    if (btn) btn.addEventListener("click", startGithubOAuth);
+  });
+  const disconnectBtns = document.querySelectorAll("#github-oauth-disconnect-btn, #settings-github-disconnect-btn");
+  disconnectBtns.forEach(btn => {
+    if (btn) btn.addEventListener("click", disconnectGithub);
+  });
+  const refreshBtn = document.querySelector("#github-repos-refresh-btn");
+  if (refreshBtn) refreshBtn.addEventListener("click", () => loadGithubReposList());
+
   checkIntegrations(); loadRedHatIntelligence(); loadPentestRuns(); loadSchedules();
+  checkGithubOAuthStatus();
   switchView("scan");
 }
 

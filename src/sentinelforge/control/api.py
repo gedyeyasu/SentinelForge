@@ -394,29 +394,158 @@ def create_app(
             raise HTTPException(status_code=404, detail="Schedule not found")
         return {"status": "deleted", "schedule_id": schedule_id}
 
-    # --- GitHub Integration ---
+    # --- GitHub Integration (Token + OAuth) ---
 
     @app.get("/api/github/status")
     def github_status() -> dict[str, object]:
+        # Try OAuth manager first for richer status
+        try:
+            from sentinelforge.integrations.github_oauth import GitHubOAuthManager
+
+            oauth_mgr = GitHubOAuthManager()
+            oauth_status = oauth_mgr.get_status()
+            if oauth_status.get("has_token"):
+                # Validate via GitHub API
+                client = GitHubClient()
+                health = client.health()
+                health["source"] = oauth_status.get("source", "oauth")
+                health["oauth"] = oauth_mgr.get_oauth_config_status()
+                health["login"] = health.get("login") or oauth_status.get("login")
+                return health
+        except Exception:
+            pass
+
         client = GitHubClient()
-        return client.health()
+        status = client.health()
+        try:
+            from sentinelforge.integrations.github_oauth import GitHubOAuthManager
+
+            oauth_mgr = GitHubOAuthManager()
+            status["oauth"] = oauth_mgr.get_oauth_config_status()
+        except Exception:
+            pass
+        return status
+
+    @app.get("/api/github/oauth/config")
+    def github_oauth_config() -> dict[str, object]:
+        from sentinelforge.integrations.github_oauth import GitHubOAuthManager
+
+        mgr = GitHubOAuthManager()
+        return mgr.get_oauth_config_status()
+
+    @app.get("/api/github/oauth/start")
+    def github_oauth_start(
+        redirect_after: str = Query(default="/", description="Where to redirect after auth"),
+    ) -> dict[str, object]:
+        from sentinelforge.integrations.github_oauth import GitHubOAuthManager
+
+        mgr = GitHubOAuthManager()
+        if not mgr.config.configured:
+            raise HTTPException(
+                status_code=400,
+                detail="GitHub OAuth not configured: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in .env. See docs/GITHUB_OAUTH.md",
+            )
+        try:
+            authorize_url, state = mgr.create_authorize_url(redirect_after=redirect_after)
+            return {
+                "authorize_url": authorize_url,
+                "state": state,
+                "message": "Redirect user to authorize_url",
+            }
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    @app.get("/api/github/oauth/callback")
+    def github_oauth_callback(
+        code: str = Query(default=""),
+        state: str = Query(default=""),
+    ):
+        from fastapi.responses import HTMLResponse
+
+        from sentinelforge.integrations.github_oauth import GitHubOAuthManager
+
+        mgr = GitHubOAuthManager()
+
+        # Handle error from GitHub
+        html_error = """
+        <html><body style="font-family:sans-serif; padding:2rem">
+        <h2>GitHub OAuth Failed</h2><p>{error}</p>
+        <p><a href="/">Back to SentinelForge</a></p>
+        </body></html>
+        """
+
+        try:
+            if not code:
+                return HTMLResponse(content=html_error.format(error="No code provided from GitHub"), status_code=400)
+
+            token = mgr.exchange_code_for_token(code, state)
+
+            html_success = f"""
+            <html><head><title>GitHub Connected</title></head>
+            <body style="font-family:Instrument Sans, sans-serif; background:#0E1417; color:#F1F4F2; padding:2rem; text-align:center">
+            <div style="max-width:480px; margin:4rem auto; background:#151D21; border:1px solid #29353A; border-radius:6px; padding:2rem">
+            <h2 style="color:#34D399">✓ GitHub Connected</h2>
+            <p>Authenticated as <strong>{token.login or 'GitHub User'}</strong></p>
+            <p style="color:#91A09B; font-size:14px">Token stored securely in .sentinelforge/github_token.json with 600 permissions. You can close this window.</p>
+            <p style="margin-top:1.5rem"><a href="/" style="color:#55B6FF; text-decoration:none">→ Back to SentinelForge Dashboard</a></p>
+            <script>
+              // Notify opener window if in popup
+              if (window.opener) {{
+                window.opener.postMessage({{"type":"github_oauth_success","login":"{token.login or ''}"}}, "*");
+                setTimeout(() => window.close(), 2000);
+              }}
+            </script>
+            </div>
+            </body></html>
+            """
+            return HTMLResponse(content=html_success)
+
+        except ValueError as e:
+            return HTMLResponse(content=html_error.format(error=str(e)), status_code=400)
+        except Exception as e:
+            return HTMLResponse(content=html_error.format(error=f"OAuth exchange failed: {e}"), status_code=500)
+
+    @app.post("/api/github/oauth/disconnect")
+    def github_oauth_disconnect() -> dict[str, object]:
+        from sentinelforge.integrations.github_oauth import GitHubOAuthManager
+
+        mgr = GitHubOAuthManager()
+        deleted = mgr.delete_token()
+        return {"status": "disconnected" if deleted else "no_token", "deleted": deleted}
 
     @app.get("/api/github/repos")
     def github_list_repos(
         owner: str = Query(default=""),
         limit: int = Query(default=30, ge=1, le=100),
+        search: str = Query(default="", description="Filter repos by name"),
+        sort: str = Query(default="updated", description="Sort by updated, created, pushed, full_name"),
     ) -> dict[str, object]:
         client = GitHubClient()
         if not client.configured:
             raise HTTPException(
                 status_code=400,
-                detail="GITHUB_TOKEN not configured",
+                detail="GITHUB_TOKEN not configured. Connect via OAuth at /api/github/oauth/start or set GITHUB_TOKEN in .env",
             )
         repos = client.list_repos(
             owner=owner or None,
             per_page=limit,
         )
-        return {"repos": [r.to_dict() for r in repos], "total": len(repos)}
+        # Filter by search if provided
+        if search:
+            search_lower = search.lower()
+            repos = [r for r in repos if search_lower in r.name.lower() or search_lower in r.full_name.lower()]
+
+        # Sort
+        if sort == "updated":
+            repos = sorted(repos, key=lambda r: r.updated_at, reverse=True)
+        elif sort == "full_name":
+            repos = sorted(repos, key=lambda r: r.full_name.lower())
+
+        return {
+            "repos": [r.to_dict() for r in repos],
+            "total": len(repos),
+            "filters": {"owner": owner, "search": search, "sort": sort, "limit": limit},
+        }
 
     # --- Source Code Scanning ---
 

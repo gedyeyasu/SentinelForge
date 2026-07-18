@@ -37,7 +37,13 @@ class GitHubRepo:
 
 
 class GitHubClient:
-    """GitHub API client for listing and cloning repositories."""
+    """GitHub API client for listing and cloning repositories.
+    
+    Supports multiple token sources for enterprise OAuth flow:
+    1. Explicit token param
+    2. GITHUB_TOKEN env var
+    3. OAuth token file .sentinelforge/github_token.json (from OAuth flow)
+    """
 
     def __init__(
         self,
@@ -46,8 +52,39 @@ class GitHubClient:
         timeout_seconds: float = 30,
         client: httpx.Client | None = None,
     ) -> None:
-        self._token = token or os.environ.get("GITHUB_TOKEN", "").strip()
+        resolved_token = token
+        if not resolved_token:
+            resolved_token = os.environ.get("GITHUB_TOKEN", "").strip()
+        if not resolved_token:
+            # Try OAuth file
+            try:
+                from pathlib import Path
+                import json
+
+                oauth_file = Path(".sentinelforge/github_token.json")
+                if oauth_file.is_file():
+                    data = json.loads(oauth_file.read_text(encoding="utf-8"))
+                    resolved_token = data.get("access_token", "").strip()
+            except Exception:
+                pass
+
+        self._token = resolved_token or ""
         self._client = client or httpx.Client(timeout=timeout_seconds)
+
+    @staticmethod
+    def load_token_from_any_source() -> str:
+        """Load token from any source: OAuth file, env, explicit"""
+        # Try OAuth manager first
+        try:
+            from sentinelforge.integrations.github_oauth import GitHubOAuthManager
+
+            manager = GitHubOAuthManager()
+            token_obj = manager.load_token()
+            if token_obj and token_obj.access_token:
+                return token_obj.access_token
+        except Exception:
+            pass
+        return os.environ.get("GITHUB_TOKEN", "").strip()
 
     @property
     def configured(self) -> bool:
