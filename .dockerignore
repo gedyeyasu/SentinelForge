@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+.venv
+venv
+
+# Env and secrets
+.env
+.env.local
+*.key
+.sentinelforge/
+.sentinelforge
+.nemo/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs (not needed in image, but keep config)
+docs/*.md
+!docs/supabase_schema.sql
+
+# Large local caches
+*.log
+*.sqlite3
+*.db
