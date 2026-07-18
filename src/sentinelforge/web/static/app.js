@@ -45,6 +45,12 @@ const ui = {
   themeToggle: document.querySelector("#theme-toggle"),
   nimIntegration: document.querySelector("#nim-integration"),
   nimIntegrationStatus: document.querySelector("#nim-integration-status"),
+  intelligenceForm: document.querySelector("#intelligence-form"),
+  intelligencePackage: document.querySelector("#intelligence-package"),
+  intelligenceDot: document.querySelector("#intelligence-dot"),
+  intelligenceLabel: document.querySelector("#intelligence-label"),
+  intelligenceCount: document.querySelector("#intelligence-count"),
+  advisoryList: document.querySelector("#advisory-list"),
 };
 
 const state = {
@@ -392,6 +398,60 @@ async function checkConnection() {
   }
 }
 
+function renderAdvisories(advisories) {
+  ui.advisoryList.replaceChildren();
+  text(ui.intelligenceCount, `${advisories.length} ADVISOR${advisories.length === 1 ? "Y" : "IES"}`);
+  if (!advisories.length) {
+    const empty = document.createElement("li");
+    empty.className = "advisory-empty";
+    text(empty, "No Red Hat advisories matched this package and time window.");
+    ui.advisoryList.append(empty);
+    return;
+  }
+  advisories.forEach((advisory) => {
+    const row = document.createElement("li");
+    row.className = "advisory-row";
+    const advisoryId = document.createElement("code");
+    const severity = document.createElement("span");
+    const cves = document.createElement("span");
+    const packageName = document.createElement("span");
+    const source = document.createElement("a");
+    severity.className = "advisory-severity";
+    cves.className = "advisory-cves";
+    packageName.className = "advisory-package";
+    source.target = "_blank";
+    source.rel = "noreferrer";
+    source.href = advisory.resource_url;
+    text(advisoryId, advisory.advisory_id);
+    text(severity, advisory.severity);
+    text(cves, advisory.cves.join(" · "));
+    text(packageName, advisory.released_packages[0] || "No released package listed");
+    text(source, "Open CSAF ↗");
+    row.append(advisoryId, severity, cves, packageName, source);
+    ui.advisoryList.append(row);
+  });
+}
+
+async function loadRedHatIntelligence(event) {
+  event?.preventDefault();
+  const packageName = ui.intelligencePackage.value.trim();
+  text(ui.intelligenceLabel, "QUERYING PUBLIC CSAF API");
+  ui.intelligenceDot.classList.remove("offline");
+  try {
+    const query = new URLSearchParams({ days: "90", limit: "3" });
+    if (packageName) query.set("package", packageName);
+    const advisories = await api(`/api/intelligence/redhat?${query}`);
+    renderAdvisories(advisories);
+    text(ui.intelligenceLabel, "LIVE · RED HAT SECURITY DATA");
+    ui.intelligenceDot.classList.add("safe");
+  } catch (error) {
+    ui.intelligenceDot.classList.remove("safe");
+    ui.intelligenceDot.classList.add("offline");
+    text(ui.intelligenceLabel, "RED HAT FEED UNAVAILABLE");
+    renderAdvisories([]);
+  }
+}
+
 function initialize() {
   const savedTheme = localStorage.getItem("sentinelforge.theme");
   setTheme(savedTheme || "dark");
@@ -402,7 +462,9 @@ function initialize() {
   ui.downloadEvidence.addEventListener("click", downloadEvidence);
   ui.copyDigest.addEventListener("click", copyDigest);
   ui.themeToggle.addEventListener("click", toggleTheme);
+  ui.intelligenceForm.addEventListener("submit", loadRedHatIntelligence);
   checkConnection();
+  loadRedHatIntelligence();
 }
 
 initialize();

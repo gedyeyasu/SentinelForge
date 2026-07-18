@@ -291,6 +291,31 @@
                 </div>
                 <pre id="verification-output" tabindex="0">Awaiting isolated patch verification.</pre>
               </article>
+
+              <article class="panel intelligence-panel">
+                <header class="panel-header intelligence-header">
+                  <div>
+                    <p class="eyebrow">RED HAT LIVE SECURITY DATA</p>
+                    <h2>Advisory intelligence</h2>
+                  </div>
+                  <form id="intelligence-form" class="intelligence-form">
+                    <label class="sr-only" for="intelligence-package">RPM package filter</label>
+                    <input
+                      id="intelligence-package"
+                      value="compat-openssl11"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                    <button class="secondary-button" type="submit">Refresh live feed</button>
+                  </form>
+                </header>
+                <div class="intelligence-status">
+                  <span class="status-dot safe" id="intelligence-dot"></span>
+                  <strong id="intelligence-label">QUERYING PUBLIC CSAF API</strong>
+                  <span id="intelligence-count">—</span>
+                </div>
+                <ol class="advisory-list" id="advisory-list"></ol>
+              </article>
             </div>
 
             <footer class="proof-footer">

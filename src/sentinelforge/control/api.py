@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from sentinelforge.control.models import DetectionRunRequest, RunEvent, RunRecord
 from sentinelforge.control.service import DetectionRunService, RepositoryNotAuthorizedError
 from sentinelforge.control.storage import SQLiteRunStore
+from sentinelforge.integrations import RedHatAdvisory, RedHatSecurityDataClient
 
 
 def create_app(
@@ -50,6 +52,23 @@ def create_app(
                 )
             },
         }
+
+    @app.get("/api/intelligence/redhat", response_model=list[RedHatAdvisory])
+    def red_hat_intelligence(
+        package: str | None = Query(default=None, min_length=1, max_length=80),
+        days: int = Query(default=30, ge=1, le=365),
+        limit: int = Query(default=10, ge=1, le=25),
+    ) -> list[RedHatAdvisory]:
+        try:
+            return RedHatSecurityDataClient().list_advisories(
+                package=package,
+                created_days_ago=days,
+                per_page=limit,
+            )
+        except (httpx.HTTPError, ValueError) as error:
+            raise HTTPException(
+                status_code=502, detail="Red Hat security data unavailable"
+            ) from error
 
     @app.post("/api/runs", response_model=RunRecord, status_code=202)
     def create_run(request: DetectionRunRequest, tasks: BackgroundTasks) -> RunRecord:
