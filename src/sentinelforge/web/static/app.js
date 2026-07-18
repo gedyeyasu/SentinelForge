@@ -53,12 +53,56 @@ const ui = {
   intelligenceLabel: document.querySelector("#intelligence-label"),
   intelligenceCount: document.querySelector("#intelligence-count"),
   advisoryList: document.querySelector("#advisory-list"),
+  pentestForm: document.querySelector("#pentest-form"),
+  pentestRepository: document.querySelector("#pentest-repository"),
+  pentestScope: document.querySelector("#pentest-scope"),
+  pentestMode: document.querySelector("#pentest-mode"),
+  pentestButton: document.querySelector("#pentest-button"),
+  pentestError: document.querySelector("#pentest-error"),
+  pentestEmpty: document.querySelector("#pentest-empty"),
+  pentestActive: document.querySelector("#pentest-active"),
+  pentestLifecycle: document.querySelector("#pentest-lifecycle"),
+  pentestRunId: document.querySelector("#pentest-run-id"),
+  pentestRepoLabel: document.querySelector("#pentest-repo-label"),
+  pentestModeLabel: document.querySelector("#pentest-mode-label"),
+  pentestUpdated: document.querySelector("#pentest-updated"),
+  pentestVerdictPanel: document.querySelector("#pentest-verdict-panel"),
+  pentestVerdict: document.querySelector("#pentest-verdict"),
+  pentestVerdictRef: document.querySelector("#pentest-verdict-ref"),
+  pentestVerdictCaption: document.querySelector("#pentest-verdict-caption"),
+  pentestPhase: document.querySelector("#pentest-phase"),
+  pentestPhaseDetail: document.querySelector("#pentest-phase-detail"),
+  pentestTimeline: document.querySelector("#pentest-timeline-list"),
+  pentestEventCount: document.querySelector("#pentest-event-count"),
+  pentestResultsSummary: document.querySelector("#pentest-results-summary"),
+  pentestResultsDetail: document.querySelector("#pentest-results-detail"),
+  pentestRoutesCount: document.querySelector("#pentest-routes-count"),
+  pentestAuthCount: document.querySelector("#pentest-auth-count"),
+  pentestInjectionCount: document.querySelector("#pentest-injection-count"),
+  pentestDepVulnCount: document.querySelector("#pentest-dep-vuln-count"),
+  pentestPatternCount: document.querySelector("#pentest-pattern-count"),
+  pentestHlCount: document.querySelector("#pentest-hl-count"),
+  pentestRepeat: document.querySelector("#pentest-repeat"),
+  pentestRunsList: document.querySelector("#pentest-runs-list"),
+  refreshPentestRuns: document.querySelector("#refresh-pentest-runs"),
+  scheduleForm: document.querySelector("#schedule-form"),
+  schedRepository: document.querySelector("#sched-repository"),
+  schedScope: document.querySelector("#sched-scope"),
+  schedMode: document.querySelector("#sched-mode"),
+  schedInterval: document.querySelector("#sched-interval"),
+  schedButton: document.querySelector("#sched-button"),
+  scheduleError: document.querySelector("#schedule-error"),
+  schedulesList: document.querySelector("#schedules-list"),
+  refreshSchedules: document.querySelector("#refresh-schedules"),
 };
 
 const state = {
   currentRun: null,
   currentEvents: [],
   pollTimer: null,
+  currentPentestRun: null,
+  pentestPollTimer: null,
+  currentView: "release",
 };
 
 const eventDescriptions = {
@@ -75,20 +119,32 @@ const eventDescriptions = {
   patch_verified: ["Patch verified", "Security regression and repository tests passed."],
   patch_rejected: ["Patch rejected", "Deterministic verification did not pass."],
   run_failed: ["Run failed", "Evidence gathered before failure remains available."],
+  pentest_queued: ["Pentest queued", "Scope and repository validated."],
+  scope_validated: ["Scope validated", "Target boundaries enforced."],
+  routes_discovered: ["Routes discovered", "API attack surface mapped."],
+  exploit_attempted: ["Exploit attempted", "Attack agent probed a route."],
+  dependency_scan_completed: ["Dependency scan complete", "Red Hat advisory cross-reference finished."],
+  dependency_scan_failed: ["Dependency scan failed", "Advisory lookup encountered an error."],
+  pattern_scan_completed: ["Pattern scan complete", "Code-level exploit patterns identified."],
+  hiddenlayer_safety_scan_completed: ["Safety scan complete", "HiddenLayer injection analysis finished."],
+  phase_completed: ["Phase completed", "Orchestrator advanced to next phase."],
+  orchestration_started: ["Orchestration started", "Long-running agent workflow initiated."],
+  orchestration_completed: ["Orchestration completed", "All phases executed."],
+  orchestration_aborted: ["Orchestration aborted", "Phase failure triggered gate."],
 };
 
 function text(node, value) {
   node.textContent = value == null ? "—" : String(value);
 }
 
-function showError(message) {
-  text(ui.error, message);
-  ui.error.hidden = false;
+function showError(element, message) {
+  text(element, message);
+  element.hidden = false;
 }
 
-function clearError() {
-  ui.error.hidden = true;
-  text(ui.error, "");
+function clearError(element) {
+  element.hidden = true;
+  text(element, "");
 }
 
 function formatTime(value) {
@@ -153,20 +209,8 @@ function renderRun(run) {
   text(ui.runRepository, run.repository);
   text(ui.runUpdated, `updated ${formatTime(run.updated_at)}`);
   text(ui.candidateRef, basename(run.repository).toUpperCase());
-  setVerdict(
-    ui.candidatePanel,
-    ui.candidateVerdict,
-    ui.candidateCaption,
-    run.candidate_verdict,
-    "candidate",
-  );
-  setVerdict(
-    ui.patchPanel,
-    ui.patchVerdict,
-    ui.patchCaption,
-    run.patch_verdict,
-    "patch",
-  );
+  setVerdict(ui.candidatePanel, ui.candidateVerdict, ui.candidateCaption, run.candidate_verdict, "candidate");
+  setVerdict(ui.patchPanel, ui.patchVerdict, ui.patchCaption, run.patch_verdict, "patch");
   text(ui.integrationHealth, verdictLabel(run.integration_health));
   ui.integrationHealth.style.color =
     run.integration_health === "healthy" ? "var(--safe)" : "var(--warning)";
@@ -180,16 +224,12 @@ function renderRun(run) {
   renderPatch(bundle);
   renderVerification(verification);
   ui.downloadEvidence.disabled = !run.result;
-
-  if (run.error) showError(run.error);
+  if (run.error) showError(ui.error, run.error);
 }
 
 function renderCandidates(candidates, selectedId) {
   ui.candidateList.replaceChildren();
-  text(
-    ui.candidateCount,
-    `${candidates.length} CANDIDATE${candidates.length === 1 ? "" : "S"}`,
-  );
+  text(ui.candidateCount, `${candidates.length} CANDIDATE${candidates.length === 1 ? "" : "S"}`);
   if (!candidates.length) {
     const empty = document.createElement("li");
     empty.className = "candidate-empty";
@@ -202,25 +242,20 @@ function renderCandidates(candidates, selectedId) {
     row.className = "candidate-row";
     if (candidate.candidate_id === selectedId) row.classList.add("is-selected");
     if (!candidate.verified) row.classList.add("is-rejected");
-
     const worker = document.createElement("div");
     const workerName = document.createElement("strong");
     const workerModel = document.createElement("small");
     text(workerName, candidate.source === "nvidia_nim" ? "NEMOTRON / NIM" : "DETERMINISTIC CORE");
     text(workerModel, candidate.model || candidate.candidate_id);
     worker.append(workerName, workerModel);
-
     const verdict = document.createElement("strong");
     verdict.className = `candidate-status ${candidate.verified ? "is-passed" : "is-failed"}`;
     text(verdict, candidate.verified ? "PASSED" : "REJECTED");
-
     const change = document.createElement("span");
     const files = candidate.patch_bundle?.changed_files?.length || 0;
     text(change, `${candidate.changed_lines} LINES · ${files} FILES`);
-
     const duration = document.createElement("span");
     text(duration, `${candidate.verification?.duration_ms ?? "—"} MS`);
-
     const decision = document.createElement("strong");
     decision.className = "candidate-decision";
     text(decision, candidate.candidate_id === selectedId ? "SELECTED" : "NOT SELECTED");
@@ -287,43 +322,40 @@ function renderVerification(verification) {
 
 function eventPayloadSummary(event) {
   const payload = event.payload || {};
+  if (event.kind === "routes_discovered") return `${payload.route_count || 0} routes mapped`;
+  if (event.kind === "exploit_attempted") return `${payload.agent} · ${payload.route} · ${payload.outcome}`;
+  if (event.kind === "dependency_scan_completed") return `${payload.vulnerability_count} vulns in ${payload.unique_packages} packages`;
+  if (event.kind === "pattern_scan_completed") return `${payload.finding_count} patterns in ${payload.files_scanned} files`;
+  if (event.kind === "hiddenlayer_safety_scan_completed") return `${payload.files_scanned} files scanned`;
+  if (event.kind === "phase_completed") return `${payload.phase} · ${payload.success ? "ok" : "failed"} · ${payload.duration_ms}ms`;
+  if (event.kind === "orchestration_started") return `mode: ${payload.mode} · ${payload.phases?.length || 0} phases`;
+  if (event.kind === "orchestration_completed") return `${payload.phases_completed?.length || 0} phases completed`;
+  if (event.kind === "orchestration_aborted") return `aborted at ${payload.phase}: ${payload.error}`;
+  if (event.kind === "run_queued") return payload.repository || "authorized repository";
   if (event.kind === "scan_started") return payload.detector || "detector";
   if (event.kind === "scan_completed") return `${payload.finding_count || 0} finding(s)`;
-  if (event.kind === "finding_confirmed") {
-    return `${payload.rule_id || "finding"} · ${String(payload.severity || "").toUpperCase()}`;
-  }
+  if (event.kind === "finding_confirmed") return `${payload.rule_id || "finding"} · ${String(payload.severity || "").toUpperCase()}`;
   if (event.kind === "patch_verified" || event.kind === "patch_rejected") {
     const digest = String(payload.patch_sha256 || "").slice(0, 12);
     return `${digest || "patch"} · exit ${payload.exit_code} · ${payload.duration_ms} ms`;
   }
-  if (event.kind === "model_candidate_started") {
-    return `${payload.model || "configured model"} · isolated lane`;
-  }
+  if (event.kind === "model_candidate_started") return `${payload.model || "configured model"} · isolated lane`;
   if (event.kind === "model_candidate_verified" || event.kind === "model_candidate_rejected") {
     return `${payload.model || "Nemotron"} · exit ${payload.exit_code} · ${payload.generation_latency_ms} ms generation`;
   }
-  if (event.kind === "model_candidate_failed") {
-    return `${payload.error_type || "provider error"} · deterministic lane continued`;
-  }
-  if (event.kind === "candidate_selected") {
-    return `${payload.candidate_id} · ${payload.changed_lines} changed lines`;
-  }
-  if (event.kind === "run_queued") return payload.repository || "authorized repository";
+  if (event.kind === "candidate_selected") return `${payload.candidate_id} · ${payload.changed_lines} changed lines`;
   return event.phase;
 }
 
-function renderEvents(events) {
-  state.currentEvents = events;
-  ui.timeline.replaceChildren();
+function renderEvents(target, events) {
+  target.replaceChildren();
   events.forEach((event, index) => {
     const item = document.createElement("li");
     item.className = "timeline-item";
     item.dataset.kind = event.kind;
-
     const marker = document.createElement("span");
     marker.className = "timeline-marker";
     text(marker, String(index + 1).padStart(2, "0"));
-
     const content = document.createElement("div");
     content.className = "timeline-content";
     const title = document.createElement("strong");
@@ -332,28 +364,20 @@ function renderEvents(events) {
     text(title, labels[0]);
     text(description, `${labels[1]} · ${eventPayloadSummary(event)}`);
     content.append(title, description);
-
     const time = document.createElement("time");
     time.className = "timeline-time";
     time.dateTime = event.occurred_at;
     text(time, formatTime(event.occurred_at));
     item.append(marker, content, time);
-    ui.timeline.append(item);
+    target.append(item);
   });
-  text(ui.eventCount, `${events.length} EVENT${events.length === 1 ? "" : "S"}`);
 }
 
 async function api(path, options) {
   const response = await fetch(path, options);
   let payload = null;
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
-  if (!response.ok) {
-    throw new Error(payload?.detail || `Request failed with status ${response.status}`);
-  }
+  try { payload = await response.json(); } catch { payload = null; }
+  if (!response.ok) throw new Error(payload?.detail || `Request failed with status ${response.status}`);
   return payload;
 }
 
@@ -364,8 +388,8 @@ async function refreshRun(runId) {
       api(`/api/runs/${encodeURIComponent(runId)}/events`),
     ]);
     renderRun(run);
-    renderEvents(events);
-    clearError();
+    renderEvents(ui.timeline, events);
+    clearError(ui.error);
     if (["queued", "running"].includes(run.lifecycle)) {
       state.pollTimer = window.setTimeout(() => refreshRun(runId), 450);
     } else {
@@ -374,13 +398,13 @@ async function refreshRun(runId) {
     }
   } catch (error) {
     ui.runButton.disabled = false;
-    showError(error.message);
+    showError(ui.error, error.message);
   }
 }
 
 async function createRun(event) {
   event?.preventDefault();
-  clearError();
+  clearError(ui.error);
   window.clearTimeout(state.pollTimer);
   ui.runButton.disabled = true;
   ui.runButton.querySelector("span").textContent = "Starting…";
@@ -388,29 +412,22 @@ async function createRun(event) {
     const run = await api("/api/runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        repository: ui.repository.value.trim(),
-        remediate: ui.remediate.checked,
-      }),
+      body: JSON.stringify({ repository: ui.repository.value.trim(), remediate: ui.remediate.checked }),
     });
     renderRun(run);
-    renderEvents([]);
+    renderEvents(ui.timeline, []);
     localStorage.setItem("sentinelforge.repository", ui.repository.value.trim());
     await refreshRun(run.run_id);
   } catch (error) {
     ui.runButton.disabled = false;
     ui.runButton.querySelector("span").textContent = "Start proof run";
-    showError(error.message);
+    showError(ui.error, error.message);
   }
 }
 
 function downloadEvidence() {
   if (!state.currentRun) return;
-  const payload = {
-    run: state.currentRun,
-    events: state.currentEvents,
-    exported_at: new Date().toISOString(),
-  };
+  const payload = { run: state.currentRun, events: state.currentEvents, exported_at: new Date().toISOString() };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
@@ -427,7 +444,7 @@ async function copyDigest() {
     text(ui.copyDigest, "Copied");
     window.setTimeout(() => text(ui.copyDigest, "Copy digest"), 1200);
   } catch {
-    showError("Clipboard access was denied. Select the digest manually.");
+    showError(ui.error, "Clipboard access was denied.");
   }
 }
 
@@ -438,8 +455,20 @@ function setTheme(theme) {
 }
 
 function toggleTheme() {
-  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-  setTheme(next);
+  setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+}
+
+function switchView(viewName) {
+  state.currentView = viewName;
+  document.querySelectorAll(".view-panel").forEach((panel) => {
+    panel.hidden = true;
+  });
+  const target = document.getElementById(`view-${viewName}`);
+  if (target) target.hidden = false;
+  document.querySelectorAll(".rail-nav .nav-item").forEach((item) => {
+    const itemView = item.dataset.view;
+    item.classList.toggle("active", itemView === viewName);
+  });
 }
 
 async function checkConnection() {
@@ -453,9 +482,6 @@ async function checkConnection() {
     nimDot.classList.toggle("safe", nimConfigured);
     nimDot.classList.toggle("waiting", !nimConfigured);
     text(ui.nimIntegrationStatus, nimConfigured ? "READY" : "KEY");
-    ui.nimIntegration.title = nimConfigured
-      ? integrations.nvidia_nim.model
-      : "Add NVIDIA_API_KEY to the local .env file";
   } catch {
     ui.connectionDot.classList.remove("safe");
     ui.connectionDot.classList.add("offline");
@@ -509,12 +535,191 @@ async function loadRedHatIntelligence(event) {
     renderAdvisories(advisories);
     text(ui.intelligenceLabel, "LIVE · RED HAT SECURITY DATA");
     ui.intelligenceDot.classList.add("safe");
-  } catch (error) {
+  } catch {
     ui.intelligenceDot.classList.remove("safe");
     ui.intelligenceDot.classList.add("offline");
     text(ui.intelligenceLabel, "RED HAT FEED UNAVAILABLE");
     renderAdvisories([]);
   }
+}
+
+function renderPentestRun(data) {
+  const run = data.pentest_run;
+  if (!run) return;
+  state.currentPentestRun = run;
+  ui.pentestEmpty.hidden = true;
+  ui.pentestActive.hidden = false;
+  text(ui.pentestLifecycle, verdictLabel(run.status));
+  text(ui.pentestRunId, run.run_id.toUpperCase());
+  text(ui.pentestRepoLabel, basename(run.repository));
+  text(ui.pentestModeLabel, `mode — ${run.mode || "standard"}`);
+  text(ui.pentestUpdated, `updated ${formatTime(run.updated_at)}`);
+  text(ui.pentestVerdictRef, run.run_id.slice(-8).toUpperCase());
+  setVerdict(ui.pentestVerdictPanel, ui.pentestVerdict, ui.pentestVerdictCaption, run.candidate_verdict, "candidate");
+  text(ui.pentestPhase, verdictLabel(run.phase));
+  text(ui.pentestPhaseDetail, `Status: ${verdictLabel(run.status)}`);
+
+  const events = data.events || [];
+  renderEvents(ui.pentestTimeline, events);
+  text(ui.pentestEventCount, `${events.length} EVENT${events.length === 1 ? "" : "S"}`);
+
+  const results = run.results || {};
+  if (results.summary || results.routes) {
+    ui.pentestResultsSummary.hidden = true;
+    ui.pentestResultsDetail.hidden = false;
+    text(ui.pentestRoutesCount, String(results.routes?.length || 0));
+    const receipts = results.receipts || [];
+    text(ui.pentestAuthCount, String(receipts.filter((r) => r.agent === "auth_attacker").length || 0));
+    text(ui.pentestInjectionCount, String(results.injection_results?.length || 0));
+    const depVulns = results.dependency_vulnerabilities;
+    text(ui.pentestDepVulnCount, String(depVulns?.vulnerable_count || 0));
+    const patterns = results.exploit_patterns;
+    text(ui.pentestPatternCount, String(patterns?.finding_count || 0));
+    text(ui.pentestHlCount, String(results.hiddenlayer_scans?.length || 0));
+  }
+
+  if (run.error) showError(ui.pentestError, run.error);
+}
+
+async function refreshPentestRun(runId) {
+  try {
+    const data = await api(`/api/pentest/${encodeURIComponent(runId)}`);
+    renderPentestRun(data);
+    clearError(ui.pentestError);
+    const run = data.pentest_run;
+    if (run && ["queued", "running"].includes(run.status)) {
+      state.pentestPollTimer = window.setTimeout(() => refreshPentestRun(runId), 450);
+    } else {
+      ui.pentestButton.disabled = false;
+      ui.pentestButton.querySelector("span").textContent = "Start pentest";
+      loadPentestRuns();
+    }
+  } catch (error) {
+    ui.pentestButton.disabled = false;
+    showError(ui.pentestError, error.message);
+  }
+}
+
+async function createPentest(event) {
+  event?.preventDefault();
+  clearError(ui.pentestError);
+  window.clearTimeout(state.pentestPollTimer);
+  ui.pentestButton.disabled = true;
+  ui.pentestButton.querySelector("span").textContent = "Starting…";
+  try {
+    const result = await api("/api/pentest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repository: ui.pentestRepository.value.trim(),
+        scope_file: ui.pentestScope.value.trim(),
+        mode: ui.pentestMode.value,
+      }),
+    });
+    renderPentestRun(result);
+    const run = result.pentest_run;
+    if (run) await refreshPentestRun(run.run_id);
+  } catch (error) {
+    ui.pentestButton.disabled = false;
+    ui.pentestButton.querySelector("span").textContent = "Start pentest";
+    showError(ui.pentestError, error.message);
+  }
+}
+
+async function loadPentestRuns() {
+  try {
+    const data = await api("/api/pentest?limit=20");
+    ui.pentestRunsList.replaceChildren();
+    const runs = data.runs || [];
+    if (!runs.length) {
+      const empty = document.createElement("li");
+      empty.className = "candidate-empty";
+      text(empty, "No pentest runs yet.");
+      ui.pentestRunsList.append(empty);
+      return;
+    }
+    runs.forEach((run) => {
+      const row = document.createElement("li");
+      row.className = "candidate-row";
+      row.style.cursor = "pointer";
+      row.addEventListener("click", () => {
+        ui.pentestEmpty.hidden = true;
+        ui.pentestActive.hidden = false;
+        refreshPentestRun(run.run_id);
+      });
+      const id = document.createElement("span");
+      const mode = document.createElement("span");
+      const verdict = document.createElement("strong");
+      const status = document.createElement("span");
+      const created = document.createElement("span");
+      text(id, run.run_id.slice(-12).toUpperCase());
+      text(mode, run.mode || "standard");
+      verdict.className = `candidate-status ${run.candidate_verdict === "safe" ? "is-passed" : "is-failed"}`;
+      text(verdict, verdictLabel(run.candidate_verdict));
+      text(status, verdictLabel(run.status));
+      text(created, formatTime(run.created_at));
+      row.append(id, mode, verdict, status, created);
+      ui.pentestRunsList.append(row);
+    });
+  } catch {}
+}
+
+async function createSchedule(event) {
+  event?.preventDefault();
+  clearError(ui.scheduleError);
+  try {
+    const params = new URLSearchParams({
+      repository: ui.schedRepository.value.trim(),
+      scope_file: ui.schedScope.value.trim(),
+      mode: ui.schedMode.value,
+      interval_minutes: ui.schedInterval.value,
+    });
+    await api(`/api/pentest/schedule?${params}`, { method: "POST" });
+    loadSchedules();
+  } catch (error) {
+    showError(ui.scheduleError, error.message);
+  }
+}
+
+async function loadSchedules() {
+  try {
+    const data = await api("/api/pentest/schedule");
+    ui.schedulesList.replaceChildren();
+    const schedules = data.schedules || [];
+    if (!schedules.length) {
+      const empty = document.createElement("li");
+      empty.className = "candidate-empty";
+      text(empty, "No schedules configured.");
+      ui.schedulesList.append(empty);
+      return;
+    }
+    schedules.forEach((sched) => {
+      const row = document.createElement("li");
+      row.className = "candidate-row";
+      const repo = document.createElement("span");
+      const mode = document.createElement("span");
+      const interval = document.createElement("span");
+      const nextRun = document.createElement("span");
+      const status = document.createElement("strong");
+      const action = document.createElement("button");
+      text(repo, basename(sched.repository));
+      text(mode, sched.mode);
+      text(interval, `${sched.interval_minutes}m`);
+      text(nextRun, formatTime(sched.next_run_at));
+      status.className = `candidate-status ${sched.enabled ? "is-passed" : "is-failed"}`;
+      text(status, sched.enabled ? "ACTIVE" : "PAUSED");
+      action.className = "text-button";
+      text(action, "Delete");
+      action.addEventListener("click", async () => {
+        try {
+          await api(`/api/pentest/schedule/${sched.schedule_id}`, { method: "DELETE" });
+          loadSchedules();
+        } catch {}
+      });
+      row.append(repo, mode, interval, nextRun, status, action);
+      ui.schedulesList.append(row);
+    });
+  } catch {}
 }
 
 function initialize() {
@@ -528,8 +733,21 @@ function initialize() {
   ui.copyDigest.addEventListener("click", copyDigest);
   ui.themeToggle.addEventListener("click", toggleTheme);
   ui.intelligenceForm.addEventListener("submit", loadRedHatIntelligence);
+  ui.pentestForm.addEventListener("submit", createPentest);
+  ui.pentestRepeat.addEventListener("click", () => createPentest());
+  ui.refreshPentestRuns.addEventListener("click", loadPentestRuns);
+  ui.scheduleForm.addEventListener("submit", createSchedule);
+  ui.refreshSchedules.addEventListener("click", loadSchedules);
+  document.querySelectorAll(".rail-nav .nav-item[data-view]").forEach((item) => {
+    item.addEventListener("click", (e) => {
+      e.preventDefault();
+      switchView(item.dataset.view);
+    });
+  });
   checkConnection();
   loadRedHatIntelligence();
+  loadPentestRuns();
+  loadSchedules();
 }
 
 initialize();

@@ -31,20 +31,24 @@
         </a>
 
         <nav class="rail-nav">
-          <a class="nav-item active" href="#release-proof" aria-current="page">
+          <a class="nav-item active" href="#release-proof" data-view="release" aria-current="page">
             <span class="nav-index">01</span>
             Release proof
           </a>
-          <a class="nav-item" href="#evidence-timeline">
+          <a class="nav-item" href="#pentest-view" data-view="pentest">
             <span class="nav-index">02</span>
+            Pentest
+          </a>
+          <a class="nav-item" href="#schedule-view" data-view="schedule">
+            <span class="nav-index">03</span>
+            Schedule
+          </a>
+          <a class="nav-item" href="#evidence-timeline" data-view="release">
+            <span class="nav-index">04</span>
             Evidence
           </a>
-          <a class="nav-item" href="#patch-receipt">
-            <span class="nav-index">03</span>
-            Patch receipt
-          </a>
           <span class="nav-item disabled" aria-disabled="true">
-            <span class="nav-index">04</span>
+            <span class="nav-index">05</span>
             Policies
             <small>next</small>
           </span>
@@ -66,6 +70,11 @@
             <span class="status-dot safe"></span>
             <span>Red Hat CSAF</span>
             <strong>PUBLIC</strong>
+          </div>
+          <div class="integration-row">
+            <span class="status-dot safe"></span>
+            <span>Pentest Engine</span>
+            <strong>READY</strong>
           </div>
         </div>
 
@@ -99,259 +108,512 @@
         </header>
 
         <div class="content-wrap">
-          <section class="run-launcher" aria-labelledby="launcher-title">
-            <div class="launcher-copy">
-              <p class="eyebrow">NEW ANALYSIS</p>
-              <h2 id="launcher-title">Turn a release defect into verified proof.</h2>
+          <!-- Release Proof View -->
+          <div id="view-release" class="view-panel">
+            <section class="run-launcher" aria-labelledby="launcher-title">
+              <div class="launcher-copy">
+                <p class="eyebrow">NEW ANALYSIS</p>
+                <h2 id="launcher-title">Turn a release defect into verified proof.</h2>
+                <p>
+                  SentinelForge scans an authorized repository, patches an isolated copy,
+                  generates a permanent security test, and records the exact verification result.
+                </p>
+              </div>
+              <form id="run-form" class="run-form">
+                <label for="repository">Authorized repository path</label>
+                <div class="input-row">
+                  <input
+                    id="repository"
+                    name="repository"
+                    value="examples/vulnerable_shop"
+                    autocomplete="off"
+                    spellcheck="false"
+                    required
+                  />
+                  <button class="primary-button" id="run-button" type="submit">
+                    <span>Start proof run</span>
+                    <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+                <label class="check-row">
+                  <input id="remediate" type="checkbox" checked />
+                  <span>Generate and verify an isolated patch</span>
+                </label>
+              </form>
+            </section>
+
+            <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+            <section id="empty-state" class="empty-state">
+              <div class="empty-sequence" aria-label="SentinelForge proof sequence">
+                <span><b>01</b> Detect</span>
+                <i></i>
+                <span><b>02</b> Patch</span>
+                <i></i>
+                <span><b>03</b> Verify</span>
+                <i></i>
+                <span><b>04</b> Gate</span>
+              </div>
               <p>
-                SentinelForge scans an authorized repository, patches an isolated copy,
-                generates a permanent security test, and records the exact verification result.
+                No active run. The controlled demo fixture is ready and contains one intentional
+                cross-tenant authorization defect.
               </p>
-            </div>
-            <form id="run-form" class="run-form">
-              <label for="repository">Authorized repository path</label>
-              <div class="input-row">
+            </section>
+
+            <section id="release-proof" class="proof-workspace" hidden aria-live="polite">
+              <div class="run-identity">
+                <div>
+                  <span class="lifecycle-pill" id="lifecycle">QUEUED</span>
+                  <span class="run-id" id="run-id">SF_RUN_—</span>
+                </div>
+                <div class="run-identity-meta">
+                  <span id="run-repository">repository</span>
+                  <span id="run-updated">updated —</span>
+                </div>
+              </div>
+
+              <div class="verdict-comparison" aria-label="Candidate and patch verdict comparison">
+                <article class="verdict-panel candidate" id="candidate-panel">
+                  <header>
+                    <span>RELEASE CANDIDATE</span>
+                    <code id="candidate-ref">SOURCE</code>
+                  </header>
+                  <strong class="verdict-value" id="candidate-verdict">PENDING</strong>
+                  <p id="candidate-caption">Scanning the candidate for supported security defects.</p>
+                </article>
+
+                <div class="proof-transfer" aria-hidden="true">
+                  <span>EXPLOIT-DERIVED INVARIANT</span>
+                  <i></i>
+                  <b>→</b>
+                </div>
+
+                <article class="verdict-panel patch" id="patch-panel">
+                  <header>
+                    <span>PATCH CANDIDATE</span>
+                    <code id="patch-ref">AWAITING PROOF</code>
+                  </header>
+                  <strong class="verdict-value" id="patch-verdict">PENDING</strong>
+                  <p id="patch-caption">Safety requires a fresh patch build and passing tests.</p>
+                </article>
+
+                <article class="health-panel">
+                  <span>INTEGRATION HEALTH</span>
+                  <strong id="integration-health">HEALTHY</strong>
+                  <p>Security verdicts remain independent from sponsor availability.</p>
+                </article>
+              </div>
+
+              <div class="evidence-grid">
+                <article id="evidence-timeline" class="panel timeline-panel">
+                  <header class="panel-header">
+                    <div>
+                      <p class="eyebrow">APPEND-ONLY LOG</p>
+                      <h2>Evidence timeline</h2>
+                    </div>
+                    <span class="event-count" id="event-count">0 EVENTS</span>
+                  </header>
+                  <ol class="timeline" id="timeline-list"></ol>
+                </article>
+
+                <article class="panel finding-panel">
+                  <header class="panel-header">
+                    <div>
+                      <p class="eyebrow">CONFIRMED DETECTION</p>
+                      <h2>Security finding</h2>
+                    </div>
+                    <span class="severity-badge" id="finding-severity">PENDING</span>
+                  </header>
+                  <div id="finding-empty" class="panel-empty">Waiting for detector evidence.</div>
+                  <div id="finding-detail" hidden>
+                    <code class="finding-rule" id="finding-rule"></code>
+                    <h3 id="finding-title"></h3>
+                    <p id="finding-description"></p>
+                    <dl class="evidence-list">
+                      <div>
+                        <dt>Endpoint</dt>
+                        <dd id="finding-endpoint"></dd>
+                      </div>
+                      <div>
+                        <dt>Location</dt>
+                        <dd id="finding-location"></dd>
+                      </div>
+                      <div>
+                        <dt>Confidence</dt>
+                        <dd id="finding-confidence"></dd>
+                      </div>
+                    </dl>
+                    <div class="invariant-box">
+                      <span>SECURITY INVARIANT</span>
+                      <p id="finding-invariant"></p>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="panel competition-panel">
+                  <header class="panel-header">
+                    <div>
+                      <p class="eyebrow">ISOLATED PATCH ARENA</p>
+                      <h2>Candidate competition</h2>
+                    </div>
+                    <span class="event-count" id="candidate-count">0 CANDIDATES</span>
+                  </header>
+                  <div class="candidate-table-header" aria-hidden="true">
+                    <span>Worker</span>
+                    <span>Verdict</span>
+                    <span>Change</span>
+                    <span>Verify</span>
+                    <span>Decision</span>
+                  </div>
+                  <ol class="candidate-list" id="candidate-list">
+                    <li class="candidate-empty">Waiting for isolated patch candidates.</li>
+                  </ol>
+                </article>
+
+                <article id="patch-receipt" class="panel receipt-panel">
+                  <header class="panel-header">
+                    <div>
+                      <p class="eyebrow">CONTENT-ADDRESSED ARTIFACT</p>
+                      <h2>Patch receipt</h2>
+                    </div>
+                    <button class="text-button" id="copy-digest" type="button" disabled>Copy digest</button>
+                  </header>
+                  <div class="digest-block">
+                    <span>SHA-256</span>
+                    <code id="patch-digest">Waiting for a verified patch…</code>
+                  </div>
+                  <div class="receipt-facts">
+                    <div>
+                      <span>Changed files</span>
+                      <strong id="changed-files">—</strong>
+                    </div>
+                    <div>
+                      <span>Workspace</span>
+                      <strong>ISOLATED</strong>
+                    </div>
+                    <div>
+                      <span>Source mutated</span>
+                      <strong>NO</strong>
+                    </div>
+                    <div>
+                      <span>Human merge gate</span>
+                      <strong>REQUIRED</strong>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="panel verification-panel">
+                  <header class="panel-header">
+                    <div>
+                      <p class="eyebrow">DETERMINISTIC JUDGE</p>
+                      <h2>Verification</h2>
+                    </div>
+                    <span class="verification-badge" id="verification-status">NOT RUN</span>
+                  </header>
+                  <div class="test-summary">
+                    <div>
+                      <strong id="test-count">—</strong>
+                      <span>checks passing</span>
+                    </div>
+                    <div>
+                      <strong id="verification-duration">—</strong>
+                      <span>verification time</span>
+                    </div>
+                  </div>
+                  <pre id="verification-output" tabindex="0">Awaiting isolated patch verification.</pre>
+                </article>
+
+                <article class="panel intelligence-panel">
+                  <header class="panel-header intelligence-header">
+                    <div>
+                      <p class="eyebrow">RED HAT LIVE SECURITY DATA</p>
+                      <h2>Advisory intelligence</h2>
+                    </div>
+                    <form id="intelligence-form" class="intelligence-form">
+                      <label class="sr-only" for="intelligence-package">RPM package filter</label>
+                      <input
+                        id="intelligence-package"
+                        value="compat-openssl11"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                      <button class="secondary-button" type="submit">Refresh live feed</button>
+                    </form>
+                  </header>
+                  <div class="intelligence-status">
+                    <span class="status-dot safe" id="intelligence-dot"></span>
+                    <strong id="intelligence-label">QUERYING PUBLIC CSAF API</strong>
+                    <span id="intelligence-count">—</span>
+                  </div>
+                  <ol class="advisory-list" id="advisory-list"></ol>
+                </article>
+              </div>
+
+              <footer class="proof-footer">
+                <p id="coverage-note">
+                  Verdict applies only to the supported checks executed against this exact artifact.
+                </p>
+                <div>
+                  <button class="secondary-button" id="download-evidence" type="button" disabled>
+                    Export evidence JSON
+                  </button>
+                  <button class="primary-button compact" id="repeat-run" type="button">
+                    Run again
+                  </button>
+                </div>
+              </footer>
+            </section>
+          </div>
+
+          <!-- Pentest View -->
+          <div id="view-pentest" class="view-panel" hidden>
+            <section class="run-launcher" aria-labelledby="pentest-launcher-title">
+              <div class="launcher-copy">
+                <p class="eyebrow">ADVERSARIAL TESTING</p>
+                <h2 id="pentest-launcher-title">Run an enterprise pentest against authorized targets.</h2>
+                <p>
+                  SentinelForge pentest agents probe authentication, injection, dependency
+                  vulnerabilities, and code-level exploit patterns in a scoped sandbox.
+                </p>
+              </div>
+              <form id="pentest-form" class="run-form">
+                <label for="pentest-repository">Repository path</label>
+                <div class="input-row">
+                  <input
+                    id="pentest-repository"
+                    name="pentest-repository"
+                    value="examples/vulnerable_shop"
+                    autocomplete="off"
+                    spellcheck="false"
+                    required
+                  />
+                  <button class="primary-button" id="pentest-button" type="submit">
+                    <span>Start pentest</span>
+                    <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+                <div class="input-row">
+                  <label for="pentest-scope">Scope file</label>
+                  <input
+                    id="pentest-scope"
+                    value="config/scope.yaml"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <div class="input-row">
+                  <label for="pentest-mode">Mode</label>
+                  <select id="pentest-mode">
+                    <option value="quick">Quick — source-only scan</option>
+                    <option value="standard" selected>Standard — balanced coverage</option>
+                    <option value="full">Full — comprehensive deep scan</option>
+                    <option value="targeted">Targeted — auth + injection focus</option>
+                    <option value="pre_release">Pre-release — mandatory gate</option>
+                    <option value="continuous">Continuous — long-running monitor</option>
+                  </select>
+                </div>
+              </form>
+            </section>
+
+            <div id="pentest-error" class="error-banner" role="alert" hidden></div>
+
+            <section id="pentest-empty" class="empty-state">
+              <div class="empty-sequence" aria-label="Pentest sequence">
+                <span><b>01</b> Scope</span>
+                <i></i>
+                <span><b>02</b> Map</span>
+                <i></i>
+                <span><b>03</b> Attack</span>
+                <i></i>
+                <span><b>04</b> Attest</span>
+              </div>
+              <p>No active pentest. Select a mode and start an adversarial test run.</p>
+            </section>
+
+            <section id="pentest-active" class="proof-workspace" hidden aria-live="polite">
+              <div class="run-identity">
+                <div>
+                  <span class="lifecycle-pill" id="pentest-lifecycle">QUEUED</span>
+                  <span class="run-id" id="pentest-run-id">SF_PENTEST_—</span>
+                </div>
+                <div class="run-identity-meta">
+                  <span id="pentest-repo-label">repository</span>
+                  <span id="pentest-mode-label">mode — standard</span>
+                  <span id="pentest-updated">updated —</span>
+                </div>
+              </div>
+
+              <div class="verdict-comparison">
+                <article class="verdict-panel candidate" id="pentest-verdict-panel">
+                  <header>
+                    <span>PENTEST VERDICT</span>
+                    <code id="pentest-verdict-ref">—</code>
+                  </header>
+                  <strong class="verdict-value" id="pentest-verdict">PENDING</strong>
+                  <p id="pentest-verdict-caption">Running adversarial agents against authorized targets.</p>
+                </article>
+
+                <article class="health-panel">
+                  <span>PHASE PROGRESS</span>
+                  <strong id="pentest-phase">INITIALIZING</strong>
+                  <p id="pentest-phase-detail">Awaiting orchestration start.</p>
+                </article>
+              </div>
+
+              <div class="evidence-grid">
+                <article class="panel timeline-panel">
+                  <header class="panel-header">
+                    <div>
+                      <p class="eyebrow">PENTEST EVENT LOG</p>
+                      <h2>Attack timeline</h2>
+                    </div>
+                    <span class="event-count" id="pentest-event-count">0 EVENTS</span>
+                  </header>
+                  <ol class="timeline" id="pentest-timeline-list"></ol>
+                </article>
+
+                <article class="panel">
+                  <header class="panel-header">
+                    <div>
+                      <p class="eyebrow">FINDINGS SUMMARY</p>
+                      <h2>Attack results</h2>
+                    </div>
+                  </header>
+                  <div id="pentest-results-summary" class="panel-empty">Awaiting results.</div>
+                  <div id="pentest-results-detail" hidden>
+                    <dl class="evidence-list">
+                      <div>
+                        <dt>Routes discovered</dt>
+                        <dd id="pentest-routes-count">—</dd>
+                      </div>
+                      <div>
+                        <dt>Auth attacks</dt>
+                        <dd id="pentest-auth-count">—</dd>
+                      </div>
+                      <div>
+                        <dt>Injection payloads</dt>
+                        <dd id="pentest-injection-count">—</dd>
+                      </div>
+                      <div>
+                        <dt>Dependency vulns</dt>
+                        <dd id="pentest-dep-vuln-count">—</dd>
+                      </div>
+                      <div>
+                        <dt>Pattern findings</dt>
+                        <dd id="pentest-pattern-count">—</dd>
+                      </div>
+                      <div>
+                        <dt>HL safety scans</dt>
+                        <dd id="pentest-hl-count">—</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </article>
+              </div>
+
+              <footer class="proof-footer">
+                <div>
+                  <button class="primary-button compact" id="pentest-repeat" type="button">
+                    Run again
+                  </button>
+                </div>
+              </footer>
+            </section>
+
+            <!-- Pentest Run History -->
+            <section class="panel" style="margin-top:2rem">
+              <header class="panel-header">
+                <div>
+                  <p class="eyebrow">RUN HISTORY</p>
+                  <h2>Recent pentest runs</h2>
+                </div>
+                <button class="secondary-button" id="refresh-pentest-runs" type="button">Refresh</button>
+              </header>
+              <div class="candidate-table-header" aria-hidden="true">
+                <span>Run ID</span>
+                <span>Mode</span>
+                <span>Verdict</span>
+                <span>Status</span>
+                <span>Created</span>
+              </div>
+              <ol class="candidate-list" id="pentest-runs-list">
+                <li class="candidate-empty">No pentest runs yet.</li>
+              </ol>
+            </section>
+          </div>
+
+          <!-- Schedule View -->
+          <div id="view-schedule" class="view-panel" hidden>
+            <section class="run-launcher">
+              <div class="launcher-copy">
+                <p class="eyebrow">AUTOMATED SECURITY GATE</p>
+                <h2>Schedule recurring pentest runs.</h2>
+                <p>
+                  Enterprise release pipelines require automated pre-release scanning.
+                  Schedule pentest runs at regular intervals to maintain continuous security assurance.
+                </p>
+              </div>
+              <form id="schedule-form" class="run-form">
+                <label for="sched-repository">Repository path</label>
                 <input
-                  id="repository"
-                  name="repository"
+                  id="sched-repository"
                   value="examples/vulnerable_shop"
                   autocomplete="off"
                   spellcheck="false"
                   required
                 />
-                <button class="primary-button" id="run-button" type="submit">
-                  <span>Start proof run</span>
+                <label for="sched-scope">Scope file</label>
+                <input
+                  id="sched-scope"
+                  value="config/scope.yaml"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <div class="input-row">
+                  <label for="sched-mode">Mode</label>
+                  <select id="sched-mode">
+                    <option value="quick">Quick</option>
+                    <option value="standard" selected>Standard</option>
+                    <option value="full">Full</option>
+                    <option value="targeted">Targeted</option>
+                    <option value="pre_release">Pre-release</option>
+                    <option value="continuous">Continuous</option>
+                  </select>
+                </div>
+                <div class="input-row">
+                  <label for="sched-interval">Interval (minutes)</label>
+                  <input id="sched-interval" type="number" value="60" min="5" max="1440" />
+                </div>
+                <button class="primary-button" id="sched-button" type="submit">
+                  <span>Create schedule</span>
                   <span aria-hidden="true">→</span>
                 </button>
+              </form>
+            </section>
+
+            <div id="schedule-error" class="error-banner" role="alert" hidden></div>
+
+            <section class="panel" style="margin-top:2rem">
+              <header class="panel-header">
+                <div>
+                  <p class="eyebrow">ACTIVE SCHEDULES</p>
+                  <h2>Pentest schedules</h2>
+                </div>
+                <button class="secondary-button" id="refresh-schedules" type="button">Refresh</button>
+              </header>
+              <div class="candidate-table-header" aria-hidden="true">
+                <span>Repository</span>
+                <span>Mode</span>
+                <span>Interval</span>
+                <span>Next Run</span>
+                <span>Status</span>
+                <span>Action</span>
               </div>
-              <label class="check-row">
-                <input id="remediate" type="checkbox" checked />
-                <span>Generate and verify an isolated patch</span>
-              </label>
-            </form>
-          </section>
-
-          <div id="error-banner" class="error-banner" role="alert" hidden></div>
-
-          <section id="empty-state" class="empty-state">
-            <div class="empty-sequence" aria-label="SentinelForge proof sequence">
-              <span><b>01</b> Detect</span>
-              <i></i>
-              <span><b>02</b> Patch</span>
-              <i></i>
-              <span><b>03</b> Verify</span>
-              <i></i>
-              <span><b>04</b> Gate</span>
-            </div>
-            <p>
-              No active run. The controlled demo fixture is ready and contains one intentional
-              cross-tenant authorization defect.
-            </p>
-          </section>
-
-          <section id="release-proof" class="proof-workspace" hidden aria-live="polite">
-            <div class="run-identity">
-              <div>
-                <span class="lifecycle-pill" id="lifecycle">QUEUED</span>
-                <span class="run-id" id="run-id">SF_RUN_—</span>
-              </div>
-              <div class="run-identity-meta">
-                <span id="run-repository">repository</span>
-                <span id="run-updated">updated —</span>
-              </div>
-            </div>
-
-            <div class="verdict-comparison" aria-label="Candidate and patch verdict comparison">
-              <article class="verdict-panel candidate" id="candidate-panel">
-                <header>
-                  <span>RELEASE CANDIDATE</span>
-                  <code id="candidate-ref">SOURCE</code>
-                </header>
-                <strong class="verdict-value" id="candidate-verdict">PENDING</strong>
-                <p id="candidate-caption">Scanning the candidate for supported security defects.</p>
-              </article>
-
-              <div class="proof-transfer" aria-hidden="true">
-                <span>EXPLOIT-DERIVED INVARIANT</span>
-                <i></i>
-                <b>→</b>
-              </div>
-
-              <article class="verdict-panel patch" id="patch-panel">
-                <header>
-                  <span>PATCH CANDIDATE</span>
-                  <code id="patch-ref">AWAITING PROOF</code>
-                </header>
-                <strong class="verdict-value" id="patch-verdict">PENDING</strong>
-                <p id="patch-caption">Safety requires a fresh patch build and passing tests.</p>
-              </article>
-
-              <article class="health-panel">
-                <span>INTEGRATION HEALTH</span>
-                <strong id="integration-health">HEALTHY</strong>
-                <p>Security verdicts remain independent from sponsor availability.</p>
-              </article>
-            </div>
-
-            <div class="evidence-grid">
-              <article id="evidence-timeline" class="panel timeline-panel">
-                <header class="panel-header">
-                  <div>
-                    <p class="eyebrow">APPEND-ONLY LOG</p>
-                    <h2>Evidence timeline</h2>
-                  </div>
-                  <span class="event-count" id="event-count">0 EVENTS</span>
-                </header>
-                <ol class="timeline" id="timeline-list"></ol>
-              </article>
-
-              <article class="panel finding-panel">
-                <header class="panel-header">
-                  <div>
-                    <p class="eyebrow">CONFIRMED DETECTION</p>
-                    <h2>Security finding</h2>
-                  </div>
-                  <span class="severity-badge" id="finding-severity">PENDING</span>
-                </header>
-                <div id="finding-empty" class="panel-empty">Waiting for detector evidence.</div>
-                <div id="finding-detail" hidden>
-                  <code class="finding-rule" id="finding-rule"></code>
-                  <h3 id="finding-title"></h3>
-                  <p id="finding-description"></p>
-                  <dl class="evidence-list">
-                    <div>
-                      <dt>Endpoint</dt>
-                      <dd id="finding-endpoint"></dd>
-                    </div>
-                    <div>
-                      <dt>Location</dt>
-                      <dd id="finding-location"></dd>
-                    </div>
-                    <div>
-                      <dt>Confidence</dt>
-                      <dd id="finding-confidence"></dd>
-                    </div>
-                  </dl>
-                  <div class="invariant-box">
-                    <span>SECURITY INVARIANT</span>
-                    <p id="finding-invariant"></p>
-                  </div>
-                </div>
-              </article>
-
-              <article class="panel competition-panel">
-                <header class="panel-header">
-                  <div>
-                    <p class="eyebrow">ISOLATED PATCH ARENA</p>
-                    <h2>Candidate competition</h2>
-                  </div>
-                  <span class="event-count" id="candidate-count">0 CANDIDATES</span>
-                </header>
-                <div class="candidate-table-header" aria-hidden="true">
-                  <span>Worker</span>
-                  <span>Verdict</span>
-                  <span>Change</span>
-                  <span>Verify</span>
-                  <span>Decision</span>
-                </div>
-                <ol class="candidate-list" id="candidate-list">
-                  <li class="candidate-empty">Waiting for isolated patch candidates.</li>
-                </ol>
-              </article>
-
-              <article id="patch-receipt" class="panel receipt-panel">
-                <header class="panel-header">
-                  <div>
-                    <p class="eyebrow">CONTENT-ADDRESSED ARTIFACT</p>
-                    <h2>Patch receipt</h2>
-                  </div>
-                  <button class="text-button" id="copy-digest" type="button" disabled>Copy digest</button>
-                </header>
-                <div class="digest-block">
-                  <span>SHA-256</span>
-                  <code id="patch-digest">Waiting for a verified patch…</code>
-                </div>
-                <div class="receipt-facts">
-                  <div>
-                    <span>Changed files</span>
-                    <strong id="changed-files">—</strong>
-                  </div>
-                  <div>
-                    <span>Workspace</span>
-                    <strong>ISOLATED</strong>
-                  </div>
-                  <div>
-                    <span>Source mutated</span>
-                    <strong>NO</strong>
-                  </div>
-                  <div>
-                    <span>Human merge gate</span>
-                    <strong>REQUIRED</strong>
-                  </div>
-                </div>
-              </article>
-
-              <article class="panel verification-panel">
-                <header class="panel-header">
-                  <div>
-                    <p class="eyebrow">DETERMINISTIC JUDGE</p>
-                    <h2>Verification</h2>
-                  </div>
-                  <span class="verification-badge" id="verification-status">NOT RUN</span>
-                </header>
-                <div class="test-summary">
-                  <div>
-                    <strong id="test-count">—</strong>
-                    <span>checks passing</span>
-                  </div>
-                  <div>
-                    <strong id="verification-duration">—</strong>
-                    <span>verification time</span>
-                  </div>
-                </div>
-                <pre id="verification-output" tabindex="0">Awaiting isolated patch verification.</pre>
-              </article>
-
-              <article class="panel intelligence-panel">
-                <header class="panel-header intelligence-header">
-                  <div>
-                    <p class="eyebrow">RED HAT LIVE SECURITY DATA</p>
-                    <h2>Advisory intelligence</h2>
-                  </div>
-                  <form id="intelligence-form" class="intelligence-form">
-                    <label class="sr-only" for="intelligence-package">RPM package filter</label>
-                    <input
-                      id="intelligence-package"
-                      value="compat-openssl11"
-                      autocomplete="off"
-                      spellcheck="false"
-                    />
-                    <button class="secondary-button" type="submit">Refresh live feed</button>
-                  </form>
-                </header>
-                <div class="intelligence-status">
-                  <span class="status-dot safe" id="intelligence-dot"></span>
-                  <strong id="intelligence-label">QUERYING PUBLIC CSAF API</strong>
-                  <span id="intelligence-count">—</span>
-                </div>
-                <ol class="advisory-list" id="advisory-list"></ol>
-              </article>
-            </div>
-
-            <footer class="proof-footer">
-              <p id="coverage-note">
-                Verdict applies only to the supported checks executed against this exact artifact.
-              </p>
-              <div>
-                <button class="secondary-button" id="download-evidence" type="button" disabled>
-                  Export evidence JSON
-                </button>
-                <button class="primary-button compact" id="repeat-run" type="button">
-                  Run again
-                </button>
-              </div>
-            </footer>
-          </section>
+              <ol class="candidate-list" id="schedules-list">
+                <li class="candidate-empty">No schedules configured.</li>
+              </ol>
+            </section>
+          </div>
         </div>
       </main>
     </div>

@@ -9,10 +9,20 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from sentinelforge.config import resolve_nvidia_config
-from sentinelforge.control.models import DetectionRunRequest, RunEvent, RunRecord
+from sentinelforge.control.models import (
+    DetectionRunRequest,
+    PentestMode,
+    PentestRunRequest,
+    RunEvent,
+    RunRecord,
+)
 from sentinelforge.control.service import DetectionRunService, RepositoryNotAuthorizedError
 from sentinelforge.control.storage import SQLiteRunStore
 from sentinelforge.integrations import RedHatAdvisory, RedHatSecurityDataClient
+from sentinelforge.pentest import PentestService
+from sentinelforge.pentest_modes import list_modes
+from sentinelforge.scheduler import PentestScheduler
+from sentinelforge.scope import ScopeValidationError, load_scope
 
 
 def create_app(
@@ -26,7 +36,9 @@ def create_app(
         workspace_root=workspace_root,
         allowed_roots=allowed_roots,
     )
-    app = FastAPI(title="SentinelForge Control Plane", version="0.1.0")
+    pentest_service = PentestService(service.store)
+    scheduler = PentestScheduler(service.store)
+    app = FastAPI(title="SentinelForge Control Plane", version="0.2.0")
     static_root = Path(__file__).parents[1] / "web" / "static"
     app.mount("/assets", StaticFiles(directory=static_root), name="assets")
 
@@ -53,6 +65,7 @@ def create_app(
                     "configured" if os.environ.get("HIDDENLAYER_API_KEY") else "awaiting_key"
                 )
             },
+            "pentest_scheduler": {"status": "active"},
         }
 
     @app.get("/api/intelligence/redhat", response_model=list[RedHatAdvisory])
@@ -93,5 +106,101 @@ def create_app(
         if service.store.get_run(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         return service.store.list_events(run_id, after=after)
+
+    @app.post("/api/pentest")
+    def create_pentest(request: PentestRunRequest) -> dict[str, object]:
+        scope_path = Path(request.scope_file)
+        if not scope_path.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Scope file not found: {scope_path}",
+            )
+        try:
+            scope = load_scope(scope_path)
+        except ScopeValidationError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        try:
+            result = pentest_service.create_and_execute(request, scope=scope)
+        except Exception as error:
+            raise HTTPException(status_code=500, detail=str(error)) from error
+        return result
+
+    @app.get("/api/pentest")
+    def list_pentest_runs(
+        limit: int = Query(default=50, ge=1, le=200),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, object]:
+        runs = service.store.list_pentest_runs(limit=limit, offset=offset)
+        return {
+            "runs": [r.model_dump() for r in runs],
+            "limit": limit,
+            "offset": offset,
+        }
+
+    @app.get("/api/pentest/{run_id}")
+    def get_pentest_run(run_id: str) -> dict[str, object]:
+        pentest = service.store.get_pentest_run(run_id)
+        if pentest is None:
+            raise HTTPException(status_code=404, detail="Pentest run not found")
+        events = service.store.list_events(run_id)
+        return {
+            "pentest_run": pentest.model_dump(),
+            "events": [e.model_dump() for e in events],
+        }
+
+    @app.get("/api/pentest/{run_id}/events")
+    def list_pentest_events(
+        run_id: str, after: int = Query(default=0, ge=0)
+    ) -> list[RunEvent]:
+        if service.store.get_pentest_run(run_id) is None:
+            raise HTTPException(status_code=404, detail="Pentest run not found")
+        return service.store.list_events(run_id, after=after)
+
+    @app.get("/api/pentest/modes")
+    def pentest_modes() -> list[dict[str, object]]:
+        return list_modes()
+
+    @app.post("/api/pentest/schedule")
+    def create_pentest_schedule(
+        repository: str = Query(min_length=1),
+        scope_file: str = Query(default="config/scope.yaml"),
+        mode: str = Query(default="standard"),
+        interval_minutes: int = Query(ge=5, le=1440, default=60),
+    ) -> dict[str, object]:
+        scope_path = Path(scope_file)
+        if not scope_path.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Scope file not found: {scope_path}",
+            )
+        try:
+            PentestMode(mode)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid mode: {mode}. "
+                f"Valid: {', '.join(m.value for m in PentestMode)}",
+            ) from None
+        schedule = scheduler.create_schedule(
+            repository=repository,
+            scope_file=scope_file,
+            mode=mode,
+            interval_minutes=interval_minutes,
+        )
+        return schedule.model_dump()
+
+    @app.get("/api/pentest/schedule")
+    def list_pentest_schedules() -> dict[str, object]:
+        schedules = scheduler.list_schedules()
+        return {
+            "schedules": [s.model_dump() for s in schedules],
+        }
+
+    @app.delete("/api/pentest/schedule/{schedule_id}")
+    def delete_pentest_schedule(schedule_id: str) -> dict[str, str]:
+        deleted = scheduler.delete_schedule(schedule_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        return {"status": "deleted", "schedule_id": schedule_id}
 
     return app

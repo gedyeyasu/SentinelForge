@@ -8,8 +8,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from sentinelforge.config import resolve_nvidia_config
+from sentinelforge.control.models import PentestRunRequest
+from sentinelforge.control.storage import SQLiteRunStore
 from sentinelforge.detectors import FastAPIBOLADetector
 from sentinelforge.inference import NIMPatchProposer
+from sentinelforge.pentest import PentestService
 from sentinelforge.remediation import (
     CandidateEvaluation,
     FastAPIBOLAPatcher,
@@ -17,6 +20,7 @@ from sentinelforge.remediation import (
     materialize_proposal,
     rank_candidates,
 )
+from sentinelforge.scope import ScopeValidationError, load_scope
 from sentinelforge.verification import verify_python_project
 
 
@@ -142,6 +146,84 @@ def _nim_proposer(args: argparse.Namespace) -> NIMPatchProposer:
     )
 
 
+def pentest_command(args: argparse.Namespace) -> int:
+    scope_path = Path(args.scope)
+    if not scope_path.is_file():
+        print(json.dumps({"error": f"Scope file not found: {scope_path}"}, indent=2))
+        return 1
+    try:
+        scope = load_scope(scope_path)
+    except ScopeValidationError as error:
+        print(json.dumps({"error": str(error)}, indent=2))
+        return 1
+
+    store = SQLiteRunStore(Path(args.db))
+    pentest_service = PentestService(store)
+
+    from sentinelforge.control.models import PentestMode as PM
+
+    request = PentestRunRequest(
+        repository=args.repository,
+        scope_file=str(scope_path),
+        attack_only_source=args.source_only,
+        mode=PM(args.mode),
+    )
+    try:
+        result = pentest_service.create_and_execute(request, scope=scope)
+    except Exception as error:
+        print(json.dumps({"error": str(error)}, indent=2))
+        return 1
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    has_success = any(
+        r.get("outcome") == "success"
+        for r in result.get("pentest_run", {}).get("results", {}).get("receipts", [])
+        if isinstance(r, dict)
+    )
+    return 1 if has_success else 0
+
+
+def pentest_list_command(args: argparse.Namespace) -> int:
+    store = SQLiteRunStore(Path(args.db))
+    runs = store.list_pentest_runs(limit=args.limit, offset=args.offset)
+    payload = {
+        "runs": [r.model_dump() for r in runs],
+        "total": len(runs),
+    }
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
+def pentest_schedule_command(args: argparse.Namespace) -> int:
+    from sentinelforge.scheduler import PentestScheduler
+
+    store = SQLiteRunStore(Path(args.db))
+    sched = PentestScheduler(store)
+
+    if args.action == "create":
+        schedule = sched.create_schedule(
+            repository=args.repository,
+            scope_file=args.scope,
+            mode=args.mode,
+            interval_minutes=args.interval,
+        )
+        print(json.dumps(schedule.to_dict(), indent=2, sort_keys=True))
+        return 0
+    elif args.action == "list":
+        schedules = sched.list_schedules()
+        payload = {"schedules": [s.to_dict() for s in schedules]}
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    elif args.action == "delete":
+        deleted = sched.delete_schedule(args.schedule_id)
+        if deleted:
+            print(json.dumps({"status": "deleted", "schedule_id": args.schedule_id}))
+            return 0
+        print(json.dumps({"error": "Schedule not found"}))
+        return 1
+    return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     nvidia = resolve_nvidia_config()
     parser = argparse.ArgumentParser(prog="sentinelforge")
@@ -189,6 +271,62 @@ def build_parser() -> argparse.ArgumentParser:
     )
     nim_remediate.add_argument("--timeout", type=int, default=90)
     nim_remediate.set_defaults(handler=nim_remediate_command)
+
+    pentest = subparsers.add_parser(
+        "pentest", help="Run active pentesting against an authorized staging target"
+    )
+    pentest.add_argument("repository")
+    pentest.add_argument(
+        "--scope", default="config/scope.yaml", help="Path to scope.yaml"
+    )
+    pentest.add_argument(
+        "--db", default=".sentinelforge/control/runs.sqlite3", help="SQLite database path"
+    )
+    pentest.add_argument(
+        "--source-only",
+        action="store_true",
+        help="Discover routes from source only, do not probe a live target",
+    )
+    pentest.add_argument(
+        "--mode",
+        default="standard",
+        choices=["quick", "standard", "full", "targeted", "pre_release", "continuous"],
+        help="Pentest mode (default: standard)",
+    )
+    pentest.set_defaults(handler=pentest_command)
+
+    pentest_list = subparsers.add_parser(
+        "pentest-list", help="List recent pentest runs"
+    )
+    pentest_list.add_argument(
+        "--db", default=".sentinelforge/control/runs.sqlite3"
+    )
+    pentest_list.add_argument("--limit", type=int, default=20)
+    pentest_list.add_argument("--offset", type=int, default=0)
+    pentest_list.set_defaults(handler=pentest_list_command)
+
+    pentest_sched = subparsers.add_parser(
+        "pentest-schedule", help="Manage pentest schedules"
+    )
+    pentest_sched.add_argument(
+        "action", choices=["create", "list", "delete"]
+    )
+    pentest_sched.add_argument("--repository", default="")
+    pentest_sched.add_argument("--scope", default="config/scope.yaml")
+    pentest_sched.add_argument(
+        "--mode", default="standard",
+        choices=["quick", "standard", "full", "targeted", "pre_release", "continuous"],
+    )
+    pentest_sched.add_argument(
+        "--interval", type=int, default=60,
+        help="Interval in minutes between scheduled runs",
+    )
+    pentest_sched.add_argument("--schedule-id", default="")
+    pentest_sched.add_argument(
+        "--db", default=".sentinelforge/control/runs.sqlite3"
+    )
+    pentest_sched.set_defaults(handler=pentest_schedule_command)
+
     return parser
 
 

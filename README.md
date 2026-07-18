@@ -1,79 +1,194 @@
 # SentinelForge
 
-SentinelForge is a proof-carrying release gate for AI-generated API changes. It detects security defects, produces structured evidence, creates a minimal patch in an isolated workspace, adds a permanent regression test, and verifies the resulting candidate before any human-approved repository action.
+SentinelForge is an autonomous adversarial release gate for teams shipping AI-generated code faster than human security teams can review it.
 
-The current vertical slice detects missing tenant authorization in FastAPI object routes. Active staging pentesting follows after this deterministic detection-and-patching core is complete.
+For every authorized release candidate, it maps the changed attack surface, dispatches bounded red-team agents, validates exploits with replayable evidence, runs NVIDIA Nemotron threat analysis, generates competing patches, attacks the patches again, runs the existing test suite, and produces a release security attestation.
 
-## First vertical slice
+Built for the **AITX Community x NVIDIA Claw Agent Hackathon**.
+
+## Quick start
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
+cp .env.example .env   # fill in your keys
 .venv/bin/sentinelforge scan examples/vulnerable_shop
 .venv/bin/sentinelforge remediate examples/vulnerable_shop
 ```
 
-Start the persisted local control plane from the repository root:
+## Active pentesting
+
+SentinelForge includes a full multi-agent pentest orchestrator with 6 enterprise modes:
 
 ```bash
-.venv/bin/sentinelforge-api
-curl -X POST http://127.0.0.1:8741/api/runs \
-  -H 'content-type: application/json' \
-  -d '{"repository":"examples/vulnerable_shop","remediate":true}'
+# Run a standard pentest against a staging target
+.venv/bin/sentinelforge pentest examples/vulnerable_shop \
+  --scope config/scope.yaml \
+  --mode standard
+
+# Quick pre-commit scan (dependency + pattern only, no live probing)
+.venv/bin/sentinelforge pentest examples/vulnerable_shop --mode quick
+
+# Pre-release gate with mandatory block-on-findings
+.venv/bin/sentinelforge pentest examples/vulnerable_shop --mode pre_release
+
+# Schedule recurring scans
+.venv/bin/sentinelforge pentest-schedule create \
+  --repository examples/vulnerable_shop \
+  --scope config/scope.yaml \
+  --mode standard \
+  --interval 60
 ```
 
-The API accepts repositories only beneath `SENTINELFORGE_ALLOWED_ROOTS` (the current directory by default). Every lifecycle change and security decision is stored as an append-only SQLite event. Candidate and patch verdicts remain separate: the vulnerable source is `blocked`, while only the exact verified patched artifact can become `safe`.
+### Pentest modes
+
+| Mode | Description | Timeout |
+|------|-------------|---------|
+| `quick` | Dependency + pattern scan only, no live probing | 60s |
+| `standard` | All agents, moderate depth, balanced | 300s |
+| `full` | Deep pentest, no route limit, extended payloads | 900s |
+| `targeted` | Auth + injection on discovered routes only | 180s |
+| `pre_release` | Full scan with mandatory block-on-findings | 600s |
+| `continuous` | Long-running monitoring with periodic re-evaluation | 1800s |
+
+### Agent phases
+
+Each pentest run executes these phases sequentially:
+
+1. **Scoping** - Validates target boundaries, allowed hosts, rate limits
+2. **Mapping** - Discovers API routes via OpenAPI + AST-based FastAPI scanner
+3. **Dependency scan** - Cross-references packages against Red Hat Security Data API
+4. **Pattern scan** - Detects 18 code-level exploit patterns (hardcoded secrets, unsafe deserialization, etc.)
+5. **Auth attack** - Cross-tenant BOLA exploitation attempts
+6. **Injection attack** - 10 payloads: prompt injection, SQL injection, XSS, SSRF, path traversal
+7. **HiddenLayer scan** - Prompt injection and model I/O defense scanning
+8. **OpenShell audit** - Policy enforcement verification
+9. **NIM analysis** - NVIDIA Nemotron threat assessment of all findings
+10. **Attestation** - Produces release verdict with evidence hashes
 
 ## NVIDIA Nemotron patch worker
 
-NVIDIA NIM exposes an OpenAI-compatible `/v1/chat/completions` API. SentinelForge uses it only to propose bounded file replacements; the model never decides whether its patch is safe. Each proposal is confined to the vulnerable source file plus `tests/`, materialized in a separate workspace, tested, and ranked against the deterministic baseline.
+SentinelForge uses NVIDIA NIM's OpenAI-compatible API for two purposes:
+
+1. **Threat analysis** - Nemotron analyzes scan results and provides risk-level assessments, CVSS estimates, and remediation recommendations
+2. **Patch proposals** - Nemotron generates bounded file replacements for confirmed findings
 
 ```bash
-export NVIDIA_API_KEY='set-this-locally-never-commit-it'
+# Check NIM connectivity
 .venv/bin/sentinelforge nim-health
+
+# Compare Nemotron patches against deterministic baseline
 .venv/bin/sentinelforge nim-remediate examples/vulnerable_shop
 ```
 
-`NIM_BASE_URL` and `NIM_MODEL` are configurable so the same adapter can target the hosted NVIDIA endpoint, a local NIM, or vLLM later. Without a key, the deterministic detection and remediation path remains fully operational.
+`NIM_BASE_URL` and `NIM_MODEL` are configurable. Without a key, the deterministic detection and remediation path remains fully operational.
 
-The CLI and server automatically load a project-local `.env`. Use `.env.example` as the exact format: one uppercase `KEY=value` assignment per line, with no spaces around `=` and no `export` prefix.
+## Control plane
 
-The controlled fixture is deliberately vulnerable and must never be publicly deployed. Remediation happens only in `.sentinelforge/runs/<finding-id>/patched`; SentinelForge does not modify the source repository, push a branch, open a pull request, merge, deploy, or send attack traffic in this phase.
+Start the persisted local control plane:
 
-## What the command proves
+```bash
+.venv/bin/sentinelforge-api
+```
 
-- The detector derives an authorization invariant from an actual FastAPI route.
-- The finding has a stable ID, severity, evidence, confidence, and remediation contract.
-- The patch is created outside the source repository and is content-addressed.
-- A cross-tenant regression test is generated alongside the patch.
-- The patched copy must pass the new security test and the repository's existing tests.
+### API endpoints
 
-See [the implementation plan](docs/PLAN.md) for the sponsor integration and adversarial-release roadmap.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/` | Dashboard |
+| `GET` | `/health` | Health check |
+| `GET` | `/api/integrations` | Integration status |
+| `POST` | `/api/runs` | Create detection run |
+| `GET` | `/api/runs/{id}` | Get run status |
+| `GET` | `/api/runs/{id}/events` | Get run events |
+| `POST` | `/api/pentest` | Create pentest run |
+| `GET` | `/api/pentest` | List pentest runs |
+| `GET` | `/api/pentest/{id}` | Get pentest run |
+| `GET` | `/api/pentest/modes` | List available modes |
+| `POST` | `/api/pentest/schedule` | Create recurring scan |
+| `GET` | `/api/pentest/schedule` | List schedules |
+| `DELETE` | `/api/pentest/schedule/{id}` | Delete schedule |
+| `GET` | `/api/intelligence/redhat` | Query Red Hat advisories |
 
-SentinelForge is an autonomous adversarial release gate for teams shipping AI-generated code faster than human security teams can review it.
+## Integrations
 
-For every authorized release candidate, it maps the changed attack surface, dispatches bounded red-team agents, validates exploits with replayable evidence, generates competing patches, attacks the patches again, runs the existing test suite, and produces a review-ready pull request plus a release security attestation.
+- **NVIDIA Nemotron/NIM** - Agent reasoning, threat analysis, patch generation
+- **OpenShell** - Policy-enforced execution sandboxes with deny-by-default
+- **HiddenLayer** - Prompt injection and model I/O defense scanning
+- **Red Hat Security Data API** - Live CVE/CSAF intelligence for dependency scanning
+- **Supabase** - Cloud persistence for pentest results and run history
 
-## Hackathon build
+## Configuration
 
-Built for the AITX Community x NVIDIA Claw Agent Hackathon, with the Red Hat Live Data track as the primary track.
+Copy `.env.example` to `.env` and fill in your keys:
 
-Planned integrations:
+```bash
+SUPABASE_URL=...
+SUPABASE_PUBLISHABLE_KEY=...
+SUPABASE_SECRET_KEY=...
+NVIDIA_API_KEY=...
+NIM_BASE_URL=https://integrate.api.nvidia.com/v1
+NIM_MODEL=nvidia/nemotron-3-nano-30b-a3b
+HIDDENLAYER_API_KEY=...
+```
 
-- NVIDIA Nemotron and NIM for agent reasoning and inference
-- NemoClaw for persistent orchestration and heartbeats
-- OpenShell for policy-enforced execution sandboxes
-- vLLM on NVIDIA Brev for concurrent model serving
-- Red Hat Security Data API for live vulnerability intelligence
-- HiddenLayer for prompt-injection and model I/O defense
-- GitHub for evidence-backed remediation pull requests
-
-The full product, architecture, safety model, demo flow, and 48-hour execution plan are in [docs/PLAN.md](docs/PLAN.md).
+The CLI and server automatically load a project-local `.env`.
 
 ## Safety boundary
 
 SentinelForge targets only explicitly authorized staging environments and controlled repositories. The hackathon build excludes production penetration testing, destructive payloads, denial-of-service, persistence, and real data exfiltration. Merging and deployment always require human approval.
 
+- Deny-by-default policy on all outbound requests
+- Attacks only within sandbox/staging scope
+- Rate-limited with configurable budgets
+- Kill switch for immediate abort
+- All actions produce SHA-256 evidence receipts
+
+## What the system proves
+
+- Deterministic BOLA detection from actual FastAPI routes
+- Multi-vector exploitation with replayable evidence
+- AI-powered threat analysis via NVIDIA Nemotron
+- Dependency vulnerability cross-referencing against Red Hat advisories
+- Code-level exploit pattern detection (18 patterns)
+- Prompt injection defense via HiddenLayer
+- Policy enforcement via OpenShell
+- Minimal patched artifact with regression tests
+- Release security attestation with evidence hashes
+
+## Architecture
+
+```
+sentinelforge/
+  agents/           # Attack and analysis agents
+    attacker.py     # Cross-tenant BOLA exploitation
+    injection.py    # 10 injection payloads
+    discovery.py    # Route discovery (OpenAPI + AST)
+    dependencies.py # Dependency manifest parsing
+    vuln_scanner.py # Red Hat CVE cross-reference
+    exploit_patterns.py # 18 code-level patterns
+    threat_analyzer.py  # NIM-powered threat analysis
+  integrations/     # External service adapters
+    hiddenlayer.py  # Prompt injection scanning
+    openshell.py    # Policy enforcement
+    red_hat.py      # Security data API
+    supabase.py     # Cloud persistence
+  control/          # API and storage
+    api.py          # FastAPI control plane
+    storage.py      # SQLite event store
+    models.py       # Pydantic models
+  inference/        # NIM patch proposals
+    nvidia_nim.py   # NVIDIA NIM adapter
+  web/static/       # Dashboard SPA
+  orchestrator.py   # Phase-based agent orchestration
+  pentest.py        # Pentest service
+  pentest_modes.py  # 6 enterprise pentest modes
+  scheduler.py      # Recurring scan scheduler
+  cli.py            # Command-line interface
+```
+
+See [docs/PLAN.md](docs/PLAN.md) for the full implementation plan.
+
 ## Iteration policy
 
-Every implementation lake must pass its relevant checks before it is committed and pushed. Each iteration should be independently demoable or provide a verified foundation for the next vertical slice.
+Every implementation must pass its relevant checks before it is committed and pushed. Each iteration should be independently demoable or provide a verified foundation for the next vertical slice.

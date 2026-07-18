@@ -1,0 +1,38 @@
+target:
+  base_url: "http://127.0.0.1:8000"
+  ownership_verified: true
+  openapi_path: "/openapi.json"
+
+allowed_hosts:
+  - "127.0.0.1"
+  - "localhost"
+
+allowed_methods:
+  - GET
+  - POST
+  - PUT
+  - PATCH
+
+forbidden_paths:
+  - /admin
+  - /internal
+
+max_requests_per_second: 3
+max_total_requests: 300
+
+allow_destructive_payloads: false
+allow_denial_of_service: false
+allow_persistence: false
+allow_data_exfiltration: false
+
+test_identities:
+  - name: "owner"
+    tenant_id: "tenant-a"
+    headers:
+      x-user-id: "tenant-a-user"
+  - name: "attacker"
+    tenant_id: "tenant-b"
+    headers:
+      x-user-id: "tenant-b-user"
+
+kill_switch_file: ".sentinelforge/STOP"
