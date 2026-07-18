@@ -21,6 +21,8 @@ def test_nim_patch_proposer_uses_openai_compatible_contract() -> None:
         assert finding.finding_id in body["messages"][1]["content"]
         assert "UNTRUSTED EXISTING TEST EXAMPLES" in body["messages"][1]["content"]
         assert "TestClient(app)" in body["messages"][1]["content"]
+        assert body["chat_template_kwargs"] == {"enable_thinking": False}
+        assert body["guided_json"]["required"] == ["finding_id", "rationale", "files"]
         proposal = {
             "finding_id": finding.finding_id,
             "rationale": "Enforce the tenant invariant before returning the order.",
@@ -79,3 +81,30 @@ def test_nim_patch_proposer_rejects_mismatched_finding() -> None:
         assert "finding_id" in str(error)
     else:
         raise AssertionError("Mismatched NIM proposal was accepted")
+
+
+def test_nim_patch_proposer_extracts_json_after_reasoning_prefix() -> None:
+    finding = FastAPIBOLADetector().scan(FIXTURE)[0]
+    proposal = {
+        "finding_id": finding.finding_id,
+        "rationale": "Enforce tenant ownership.",
+        "files": [
+            {
+                "path": finding.path,
+                "content": (FIXTURE / finding.path).read_text(encoding="utf-8"),
+            }
+        ],
+    }
+    response = {
+        "choices": [
+            {"message": {"content": f"Reasoning was disabled.\n{json.dumps(proposal)}"}}
+        ]
+    }
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response))
+    )
+    proposer = NIMPatchProposer(api_key="test-key", client=client)
+
+    result = proposer.propose(finding, str(FIXTURE))
+
+    assert result.finding_id == finding.finding_id

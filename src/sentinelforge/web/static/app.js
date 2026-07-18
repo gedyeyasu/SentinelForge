@@ -31,6 +31,8 @@ const ui = {
   findingLocation: document.querySelector("#finding-location"),
   findingConfidence: document.querySelector("#finding-confidence"),
   findingInvariant: document.querySelector("#finding-invariant"),
+  candidateCount: document.querySelector("#candidate-count"),
+  candidateList: document.querySelector("#candidate-list"),
   patchDigest: document.querySelector("#patch-digest"),
   changedFiles: document.querySelector("#changed-files"),
   copyDigest: document.querySelector("#copy-digest"),
@@ -65,6 +67,11 @@ const eventDescriptions = {
   scan_completed: ["Detection complete", "Candidate evidence set finalized."],
   finding_confirmed: ["Security finding confirmed", "Release candidate marked blocked."],
   isolated_patch_started: ["Isolated patch started", "Source repository remains unchanged."],
+  model_candidate_started: ["Nemotron candidate started", "Bounded repository context sent to NIM."],
+  model_candidate_verified: ["Nemotron candidate verified", "Model patch passed deterministic tests."],
+  model_candidate_rejected: ["Nemotron candidate rejected", "Model patch failed deterministic tests."],
+  model_candidate_failed: ["Nemotron lane degraded", "Provider failure cannot alter the security verdict."],
+  candidate_selected: ["Winning patch selected", "Passing candidates ranked by minimal change."],
   patch_verified: ["Patch verified", "Security regression and repository tests passed."],
   patch_rejected: ["Patch rejected", "Deterministic verification did not pass."],
   run_failed: ["Run failed", "Evidence gathered before failure remains available."],
@@ -169,11 +176,57 @@ function renderRun(run) {
   const bundle = result.patch_bundle || null;
   const verification = result.verification || null;
   renderFinding(finding);
+  renderCandidates(result.candidates || [], result.selected_candidate_id);
   renderPatch(bundle);
   renderVerification(verification);
   ui.downloadEvidence.disabled = !run.result;
 
   if (run.error) showError(run.error);
+}
+
+function renderCandidates(candidates, selectedId) {
+  ui.candidateList.replaceChildren();
+  text(
+    ui.candidateCount,
+    `${candidates.length} CANDIDATE${candidates.length === 1 ? "" : "S"}`,
+  );
+  if (!candidates.length) {
+    const empty = document.createElement("li");
+    empty.className = "candidate-empty";
+    text(empty, "Waiting for isolated patch candidates.");
+    ui.candidateList.append(empty);
+    return;
+  }
+  candidates.forEach((candidate) => {
+    const row = document.createElement("li");
+    row.className = "candidate-row";
+    if (candidate.candidate_id === selectedId) row.classList.add("is-selected");
+    if (!candidate.verified) row.classList.add("is-rejected");
+
+    const worker = document.createElement("div");
+    const workerName = document.createElement("strong");
+    const workerModel = document.createElement("small");
+    text(workerName, candidate.source === "nvidia_nim" ? "NEMOTRON / NIM" : "DETERMINISTIC CORE");
+    text(workerModel, candidate.model || candidate.candidate_id);
+    worker.append(workerName, workerModel);
+
+    const verdict = document.createElement("strong");
+    verdict.className = `candidate-status ${candidate.verified ? "is-passed" : "is-failed"}`;
+    text(verdict, candidate.verified ? "PASSED" : "REJECTED");
+
+    const change = document.createElement("span");
+    const files = candidate.patch_bundle?.changed_files?.length || 0;
+    text(change, `${candidate.changed_lines} LINES · ${files} FILES`);
+
+    const duration = document.createElement("span");
+    text(duration, `${candidate.verification?.duration_ms ?? "—"} MS`);
+
+    const decision = document.createElement("strong");
+    decision.className = "candidate-decision";
+    text(decision, candidate.candidate_id === selectedId ? "SELECTED" : "NOT SELECTED");
+    row.append(worker, verdict, change, duration, decision);
+    ui.candidateList.append(row);
+  });
 }
 
 function renderFinding(finding) {
@@ -242,6 +295,18 @@ function eventPayloadSummary(event) {
   if (event.kind === "patch_verified" || event.kind === "patch_rejected") {
     const digest = String(payload.patch_sha256 || "").slice(0, 12);
     return `${digest || "patch"} · exit ${payload.exit_code} · ${payload.duration_ms} ms`;
+  }
+  if (event.kind === "model_candidate_started") {
+    return `${payload.model || "configured model"} · isolated lane`;
+  }
+  if (event.kind === "model_candidate_verified" || event.kind === "model_candidate_rejected") {
+    return `${payload.model || "Nemotron"} · exit ${payload.exit_code} · ${payload.generation_latency_ms} ms generation`;
+  }
+  if (event.kind === "model_candidate_failed") {
+    return `${payload.error_type || "provider error"} · deterministic lane continued`;
+  }
+  if (event.kind === "candidate_selected") {
+    return `${payload.candidate_id} · ${payload.changed_lines} changed lines`;
   }
   if (event.kind === "run_queued") return payload.repository || "authorized repository";
   return event.phase;

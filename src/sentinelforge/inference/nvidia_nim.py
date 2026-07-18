@@ -77,9 +77,12 @@ class NIMPatchProposer:
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.2,
-                "top_p": 0.95,
+                "top_p": 1.0,
+                "top_k": 1,
                 "max_tokens": 4096,
                 "stream": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "guided_json": self._guided_json_schema(),
             },
         )
         latency_ms = int((time.monotonic() - started) * 1000)
@@ -151,6 +154,32 @@ class NIMPatchProposer:
         return "".join(chunks) or "No existing Python tests were found.\n"
 
     @staticmethod
+    def _guided_json_schema() -> dict[str, object]:
+        return {
+            "type": "object",
+            "properties": {
+                "finding_id": {"type": "string"},
+                "rationale": {"type": "string", "minLength": 1},
+                "files": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "minLength": 1},
+                            "content": {"type": "string"},
+                        },
+                        "required": ["path", "content"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["finding_id", "rationale", "files"],
+            "additionalProperties": False,
+        }
+
+    @staticmethod
     def _content(body: dict[str, Any]) -> str:
         try:
             content = body["choices"][0]["message"]["content"]
@@ -172,6 +201,14 @@ class NIMPatchProposer:
             raw = json.loads(stripped)
             return _ProposalPayload.model_validate(raw)
         except (json.JSONDecodeError, ValidationError) as error:
+            start = stripped.find("{")
+            end = stripped.rfind("}")
+            if start != -1 and end > start:
+                try:
+                    raw = json.loads(stripped[start : end + 1])
+                    return _ProposalPayload.model_validate(raw)
+                except (json.JSONDecodeError, ValidationError):
+                    pass
             raise NIMResponseError("NIM proposal was not valid bounded patch JSON") from error
 
     @staticmethod

@@ -742,8 +742,100 @@ input:hover {
   grid-column: span 5;
 }
 
+.competition-panel,
 .intelligence-panel {
   grid-column: 1 / -1;
+}
+
+.candidate-table-header,
+.candidate-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.5fr) minmax(90px, 0.7fr) minmax(135px, 1fr) minmax(90px, 0.7fr) minmax(110px, 0.8fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.candidate-table-header {
+  min-height: 34px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-inset);
+  color: var(--muted-dim);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.candidate-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.candidate-row {
+  min-height: 64px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.candidate-row:last-child {
+  border-bottom: 0;
+}
+
+.candidate-row.is-selected {
+  background: var(--safe-soft);
+  box-shadow: inset 3px 0 0 var(--safe);
+}
+
+.candidate-row.is-rejected {
+  background: var(--blocked-soft);
+}
+
+.candidate-row > div strong,
+.candidate-row > div small {
+  display: block;
+}
+
+.candidate-row > div strong {
+  color: var(--text);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.candidate-row > div small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-status,
+.candidate-decision {
+  width: max-content;
+  font-size: 8px;
+  letter-spacing: 0.07em;
+}
+
+.candidate-status.is-passed,
+.candidate-decision {
+  color: var(--safe);
+}
+
+.candidate-status.is-failed {
+  color: var(--blocked);
+}
+
+.candidate-empty {
+  padding: 20px 16px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
 }
 
 .sr-only {
@@ -1317,6 +1409,7 @@ input:hover {
 
   .timeline-panel,
   .finding-panel,
+  .competition-panel,
   .receipt-panel,
   .verification-panel,
   .intelligence-panel {
@@ -1342,6 +1435,14 @@ input:hover {
 
   .timeline-panel {
     min-height: auto;
+  }
+
+  .candidate-table-header {
+    display: none;
+  }
+
+  .candidate-row {
+    grid-template-columns: 1fr auto;
   }
 }
 
