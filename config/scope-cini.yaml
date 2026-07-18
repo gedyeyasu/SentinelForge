@@ -1,0 +1,103 @@
+# SentinelForge Scope for Cini Backend - LIVE AWS API
+# Target: https://api.cini.love/api/v1
+# This file authorizes pentesting of your own deployed backend for Loom demo
+
+target:
+  base_url: "https://api.cini.love/api/v1"
+  ownership_verified: false  # Set to true after ownership verification passes (see below)
+  openapi_path: "/openapi.json"  # Cini may have /docs or /api/docs - will auto-try /openapi.json and /docs/openapi.json
+  environment: "production"  # IMPORTANT: This is production! We will enforce extra safety
+  # For demo reliability, you can also test against local Cini backend first:
+  # base_url: "http://127.0.0.1:8000/api/v1"  # Local dev
+
+allowed_hosts:
+  - "api.cini.love"
+  - "127.0.0.1"
+  - "localhost"
+  # Optional: Add dev staging if you have it
+  # - "dev-api.cini.love"
+  # - "*.cini.love"  # Wildcard supported
+
+allowed_methods:
+  - GET
+  - POST
+  - PUT
+  - PATCH
+  # DELETE disabled by default - only enable for synthetic test records
+  # - DELETE
+
+forbidden_paths:
+  # Never touch admin, internal, billing webhooks, prod data
+  - /admin
+  - /internal
+  - /prod
+  - /.git
+  - /billing/webhook
+  - /payments/stripe/webhook
+  - /third-party
+  - /auth/admin
+  - /superuser
+  # Add any Cini-specific sensitive paths here
+  - /api/v1/admin
+  - /api/v1/internal
+
+# Rate and budget controls - EXTRA CONSERVATIVE for live prod
+max_requests_per_second: 1  # 1 rps for live prod (3 rps for staging)
+max_total_requests: 150  # Limit total requests to avoid load on live
+max_routes: 20  # Limit routes to test first 20 for demo
+
+# Destructive controls - MUST stay false for live prod
+allow_destructive_payloads: false
+allow_denial_of_service: false
+allow_persistence: false
+allow_data_exfiltration: false
+
+# Synthetic test identities for cross-tenant BOLA
+# IMPORTANT: Create 2 test user accounts in Cini (tenant-a and tenant-b) and put their auth headers here
+# For Django, likely Authorization: Bearer <token> or x-user-id
+# Example for Cini:
+test_identities:
+  - name: "owner"
+    tenant_id: "tenant-a"
+    headers:
+      # Replace with real Cini test user 1 token
+      # Get token via: curl -X POST https://api.cini.love/api/v1/auth/login -d '{"email":"test1@cini.love","password":"..."}'
+      Authorization: "Bearer REPLACE_WITH_TEST_USER_1_JWT"
+      x-user-id: "test-user-1-id"
+  - name: "attacker"
+    tenant_id: "tenant-b"
+    headers:
+      # Replace with real Cini test user 2 token
+      Authorization: "Bearer REPLACE_WITH_TEST_USER_2_JWT"
+      x-user-id: "test-user-2-id"
+
+# Kill switch - immediate abort
+kill_switch_file: ".sentinelforge/STOP"
+
+# OpenShell policy path - use cini-specific policy that allows api.cini.love
+openshell_policy_path: "config/openshell-policy-cini.yaml"
+
+# Ownership verification - MUST pass before scanning external target
+require_ownership_verification: true
+require_environment_not_production: false  # Set to false for this live prod test, but we will warn
+
+# Production safety override - for live api.cini.love you must explicitly allow
+allow_production: true  # Set to true to allow prod target (normally blocked)
+# For demo video, we recommend testing local first then live:
+# First: base_url http://127.0.0.1:8000/api/v1 with allow_production false
+# Then: base_url https://api.cini.love/api/v1 with allow_production true for final Loom
+
+# Advisory cursor for heartbeat
+advisory_cursor:
+  enabled: true
+  check_interval_seconds: 30
+  sources:
+    - redhat_csaf
+  dedupe_key: "rhsa_id+package+version"
+
+# Target memory for learning delta
+target_memory:
+  enabled: true
+  path: ".sentinelforge/memory"
+  max_runs_to_retain: 100
+  learning_delta_tracking: true

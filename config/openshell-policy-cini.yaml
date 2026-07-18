@@ -1,0 +1,183 @@
+name: SentinelForge Cini Live API Policy (Allows api.cini.love)
+version: 0.3.0
+description: |
+  Custom policy for Cini backend LIVE pentest demo:
+  - Allows api.cini.love in addition to localhost
+  - Still deny-by-default, blocks destructive DB operations
+  - Extra conservative for live prod: blocks DELETE, blocks admin paths
+  - Shows thoughtful safety: non-destructive but powerful Fable-level exploits
+  - For Loom demo video: proves agent works on real deployed AWS API
+target_environments:
+  - production
+  - staging
+  - local
+  - sandbox
+default_action: deny
+max_execution_time_seconds: 300
+allow_network: false
+allow_file_write: false
+allow_subprocess: false
+allowed_hosts:
+  - api.cini.love
+  - 127.0.0.1
+  - localhost
+  - 0.0.0.0
+forbidden_paths:
+  - /etc
+  - /var
+  - /usr
+  - /bin
+  - /boot
+  - /sys
+  - /admin
+  - /internal
+  - /prod
+  - /.git
+  - /root
+  - /api/v1/admin
+  - /api/v1/internal
+rules:
+  - action: deny
+    description: Block other production hosts except api.cini.love
+    match: 'http[s]?://(?!127\.0\.0\.1|localhost|0\.0\.0\.0|api\.cini\.love)(?!.*\.staging\.internal).*'
+    category: network
+    severity: critical
+    remediation: For Cini demo, only api.cini.love is allowed via scope-cini.yaml
+
+  - action: deny
+    description: Block private network access beyond sandbox
+    match: 'http[s]?://(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|169\.254\.|0\.0\.0\.0)'
+    category: network
+    severity: critical
+
+  - action: deny
+    description: Block destructive file operations
+    match: 'file:write\s+/(etc|var|usr|bin|boot|sys|root|tmp/.*\.\.)'
+    category: filesystem
+    severity: critical
+
+  - action: deny
+    description: Block path traversal beyond project
+    match: '\.\./\.\./|/etc/passwd|/etc/shadow|/proc/self'
+    category: filesystem
+    severity: critical
+
+  - action: deny
+    description: Block database nuking - DROP TABLE, DROP DATABASE, TRUNCATE
+    match: '(?i)\b(DROP\s+TABLE|DROP\s+DATABASE|TRUNCATE\s+TABLE|DELETE\s+FROM.*WHERE\s+1=1|DROP\s+SCHEMA)\b'
+    category: destructive
+    severity: critical
+    remediation: Destructive DB operations blocked - only read-only BOLA and non-destructive injection probes allowed for Cini live demo
+
+  - action: deny
+    description: Block mass deletion - DELETE without WHERE, rm -rf
+    match: '(?i)(DELETE\s+FROM\s+\w+\s*;|DELETE\s+FROM\s+\w+\s*$|rm\s+-rf\s+/$|rm\s+-rf\s+/\*|:\(\)\{.*\})'
+    category: destructive
+    severity: critical
+
+  - action: deny
+    description: Block privilege escalation
+    match: 'subprocess:.*\b(sudo|su -|chmod 777|chown root|passwd|visudo|usermod)\b'
+    category: process
+    severity: critical
+
+  - action: deny
+    description: Block network scanning tools
+    match: 'subprocess:.*\b(nmap|masscan|zmap|nikto|sqlmap|hydra|john|hashcat)\b'
+    category: process
+    severity: high
+
+  - action: deny
+    description: Block data exfiltration patterns
+    match: '(curl|wget|nc|netcat|scp|rsync).*\b(pastebin|ngrok|burpcollaborator|oastify|webhook\.site|requestbin)\b'
+    category: exfiltration
+    severity: critical
+
+  - action: deny
+    description: Block reverse shells
+    match: '(bash -i|/bin/bash.*-i|nc -e|ncat -e|/bin/sh.*>&|mkfifo.*sh)'
+    category: exfiltration
+    severity: critical
+
+  - action: deny
+    description: Block denial of service payloads
+    match: 'http:.*(slowloris|/dev/urandom|1000000|a{1000,})'
+    category: dos
+    severity: high
+
+  - action: deny
+    description: Block destructive SQL - UPDATE without WHERE
+    match: '(?i)\b(UPDATE\s+\w+\s+SET.*;\s*--|UPDATE.*WHERE\s+1=1)\b'
+    category: destructive
+    severity: critical
+
+  - action: deny
+    description: Block DELETE method for live prod safety
+    match: 'http:DELETE.*api\.cini\.love'
+    category: destructive
+    severity: critical
+    remediation: DELETE disabled for live Cini prod - only GET/POST/PUT/PATCH with synthetic test accounts
+
+  - action: allow
+    description: Allow Cini live API - for Loom demo
+    match: 'http[s]?://api\.cini\.love.*'
+    category: network
+    severity: info
+    rationale: Owner authorized api.cini.love via scope-cini.yaml for Loom demo with synthetic test accounts, rate limit 1 rps, non-destructive
+
+  - action: allow
+    description: Allow local staging requests
+    match: 'http[s]?://(127\.0\.0\.1|localhost|0\.0\.0\.0)(:\d+)?(/.*)?$'
+    category: network
+    severity: info
+
+  - action: allow
+    description: Allow reads in project directory
+    match: 'file:read\s+(src/|tests/|examples/|config/|fixtures/|/Users/gedeoneyasu/Projects/Cini-BackEnd)'
+    category: filesystem
+    severity: info
+
+  - action: allow
+    description: Allow writes in isolated worktree
+    match: 'file:write\s+\.sentinelforge/.*/patched/(app/|tests/test_security_)'
+    category: filesystem
+    severity: info
+
+  - action: allow
+    description: Allow custom exploit writer to write Python exploit files for Cini
+    match: 'file:write\s+\.sentinelforge/exploits/.*\.py'
+    category: filesystem
+    severity: info
+
+  - action: allow
+    description: Allow safe pytest execution
+    match: 'subprocess:\s*(python|pytest|pip).*\s+tests/'
+    category: process
+    severity: info
+
+  - action: allow
+    description: Allow custom exploit execution in sandbox for Cini live API
+    match: 'subprocess:\s*python\s+\.sentinelforge/exploits/.*\.py'
+    category: process
+    severity: info
+
+audit:
+  log_all_denied: true
+  log_allowed_network: false
+  max_log_entries: 1000
+  persist_to: .sentinelforge/openshell_audit.jsonl
+  include_in_attestation: true
+
+telemetry:
+  track_denied_actions: true
+  dashboard_highlight_denied: true
+  metric_name: openshell_denied_total
+
+integration:
+  enforcement_points:
+    - http_client: src/sentinelforge/agents/http.py ScopedHTTPClient
+    - file_ops: src/sentinelforge/remediation/candidates.py
+    - subprocess: src/sentinelforge/verification.py
+  health_check:
+    endpoint: /api/integrations
+    status_field: openshell

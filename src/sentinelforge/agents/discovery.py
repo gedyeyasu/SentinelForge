@@ -117,6 +117,66 @@ class SourceRouteDiscovery:
         return None
 
 
+class DjangoRouteDiscovery:
+    """Discover Django URL patterns from urls.py files for Cini backend and other Django projects"""
+
+    def discover_from_source(self, root: Path) -> list[DiscoveredRoute]:
+        root = root.resolve()
+        routes: list[DiscoveredRoute] = []
+        for path in sorted(root.rglob("urls.py")):
+            if any(part.startswith(".") for part in path.relative_to(root).parts):
+                continue
+            if "__pycache__" in path.parts:
+                continue
+            routes.extend(self._scan_django_urls_file(root, path))
+        return routes
+
+    def _scan_django_urls_file(self, root: Path, path: Path) -> list[DiscoveredRoute]:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            return []
+
+        routes: list[DiscoveredRoute] = []
+        # Regex for Django path() patterns: path('route/<int:pk>/', view, name='...')
+        # Also handles <str:token>, <uuid:event_id>, <slug:slug> etc
+        django_path_pattern = re.compile(
+            r"""path\(\s*['"]([^'"]+)['"]\s*,\s*([A-Za-z0-9_\.]+)""",
+        )
+        for match in django_path_pattern.finditer(content):
+            route_pattern = match.group(1)
+            view_name = match.group(2).split(".")[-1]
+
+            # Convert Django <type:name> to {name} format for DiscoveredRoute
+            # e.g., <int:pk> -> {pk}, <str:token> -> {token}, <uuid:event_id> -> {event_id}
+            django_params = re.findall(r"<(?:int|str|slug|uuid|path):([A-Za-z_][A-Za-z0-9_]*)>", route_pattern)
+            normalized_path = re.sub(r"<(?:int|str|slug|uuid|path):([A-Za-z_][A-Za-z0-9_]*)>", r"{\1}", route_pattern)
+
+            # Ensure leading slash
+            if not normalized_path.startswith("/"):
+                normalized_path = "/" + normalized_path
+
+            # Guess method: if view name contains list, get, else generic GET
+            method = "GET"
+            if "create" in view_name.lower() or "post" in view_name.lower():
+                method = "POST"
+            elif "update" in view_name.lower() or "put" in view_name.lower():
+                method = "PUT"
+            elif "delete" in view_name.lower():
+                method = "DELETE"
+
+            routes.append(
+                DiscoveredRoute(
+                    method=method,
+                    path=normalized_path,
+                    function_name=view_name,
+                    source_file=str(path.relative_to(root).as_posix()),
+                    path_params=tuple(django_params),
+                )
+            )
+        return routes
+
+
 def discover_routes(
     repository_root: Path | None = None,
     base_url: str | None = None,
@@ -125,6 +185,19 @@ def discover_routes(
     routes: list[DiscoveredRoute] = []
     if base_url:
         routes.extend(OpenAPIRouteDiscovery().discover_from_url(base_url, client))
-    if repository_root and not routes:
-        routes.extend(SourceRouteDiscovery().discover_from_source(repository_root))
+    if repository_root:
+        # Try FastAPI first, then Django if no FastAPI routes found
+        fastapi_routes = SourceRouteDiscovery().discover_from_source(repository_root)
+        if fastapi_routes:
+            routes.extend(fastapi_routes)
+        else:
+            # Fallback to Django route discovery for Cini backend and other Django projects
+            django_routes = DjangoRouteDiscovery().discover_from_source(repository_root)
+            routes.extend(django_routes)
+        # If we have OpenAPI routes plus source routes, merge (dedup by path+method)
+        if fastapi_routes and routes:
+            seen = {(r.method, r.path) for r in routes}
+            for r in fastapi_routes:
+                if (r.method, r.path) not in seen:
+                    routes.append(r)
     return routes
