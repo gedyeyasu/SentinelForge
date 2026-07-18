@@ -13,6 +13,17 @@ python3 -m venv .venv
 .venv/bin/sentinelforge remediate examples/vulnerable_shop
 ```
 
+Start the persisted local control plane from the repository root:
+
+```bash
+.venv/bin/sentinelforge-api
+curl -X POST http://127.0.0.1:8741/api/runs \
+  -H 'content-type: application/json' \
+  -d '{"repository":"examples/vulnerable_shop","remediate":true}'
+```
+
+The API accepts repositories only beneath `SENTINELFORGE_ALLOWED_ROOTS` (the current directory by default). Every lifecycle change and security decision is stored as an append-only SQLite event. Candidate and patch verdicts remain separate: the vulnerable source is `blocked`, while only the exact verified patched artifact can become `safe`.
+
 The controlled fixture is deliberately vulnerable and must never be publicly deployed. Remediation happens only in `.sentinelforge/runs/<finding-id>/patched`; SentinelForge does not modify the source repository, push a branch, open a pull request, merge, deploy, or send attack traffic in this phase.
 
 ## What the command proves

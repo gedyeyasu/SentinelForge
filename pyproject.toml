@@ -23,6 +23,7 @@ dev = [
 
 [project.scripts]
 sentinelforge = "sentinelforge.cli:main"
+sentinelforge-api = "sentinelforge.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sentinelforge"]
