@@ -216,6 +216,90 @@ agents:
     spawn_allowed: false
     can_write_repo: false
 
+  code_worker:
+    description: |
+      NemoClaw agent that works on the code - takes confirmed finding and generates minimal patch
+      in isolated worktree, with regression test, SHA256 receipt. This is the code worker agent.
+      Works on code via deterministic baseline + Nemotron via NIM/vLLM, not just scans.
+    inputs:
+      - confirmed_finding
+      - repository_snapshot
+      - existing_tests
+    allowed_tools:
+      - worktree_write
+      - test_runner
+      - nim_proposer
+      - vllm_proposer
+    output: patch_bundle_plus_verification
+    model: nvidia/nemotron-3-super-120b-a12b
+    max_tokens: 6144
+    spawn_allowed: false
+    can_write_repo: true
+    write_scope:
+      - finding_path
+      - tests/test_security_*.py
+      - max_files_changed: 3
+      - max_lines_changed: 100
+    implementation: src/sentinelforge/agents/code_worker.py CodeWorkerAgent
+
+  pr_creator:
+    description: |
+      NemoClaw agent that creates PR against GitHub repo after exploit and patch verified.
+      Takes verified patch candidate, generates PR body with severity, rule_id, SHA256, evidence hash,
+      secure clone via GIT_ASKPASS, creates branch sentinelforge/fix-{rule}/{id}, commits, pushes,
+      creates Check Run annotation at file:line (beats Snyk), generates SARIF, creates draft PR requiring human review.
+    inputs:
+      - verified_patch
+      - finding
+      - evidence_receipt
+      - repository
+    allowed_tools:
+      - git_branch
+      - git_commit
+      - git_push
+      - github_api
+      - pr_generator
+      - sarif_generator
+      - check_run_creator
+    output: pr_url_plus_branch_plus_human_review_gate
+    model: nvidia/nemotron-3-nano-30b-a3b
+    max_tokens: 3072
+    spawn_allowed: false
+    can_write_repo: false
+    implementation: src/sentinelforge/agents/pr_creator.py PRCreatorAgent
+    safety: draft PR, no auto-merge per no_agent_can_merge_pr true, requires 1 approver
+
+  patch_and_pr:
+    description: |
+      Combined agent that patches vulnerabilities AFTER exploit successful - full flow:
+      exploit successful (BOLA 200 same body) -> code_worker generates patch -> adversarial_verifier mutates exploit 3 ways and replays -> PR creator creates draft PR -> final report with human review gate + release blocked
+      This is the agent that demonstrates patching after successful exploit.
+    inputs:
+      - finding
+      - evidence_receipt
+      - repository
+      - run_root
+    allowed_tools:
+      - worktree_write
+      - test_runner
+      - nim_proposer
+      - payload_mutator
+      - scoped_attack_mutated
+      - git_branch
+      - pr_generator
+    output: final_report_finding_patch_verification_pr_human_gate
+    model: nvidia/nemotron-3-super-120b-a12b
+    max_tokens: 8192
+    spawn_allowed: false
+    can_write_repo: true
+    implementation: src/sentinelforge/agents/pr_creator.py PatchAndPRAgent
+    flow:
+      - exploit successful? If not, no patch needed
+      - patch vulnerabilities via code_worker
+      - verify via adversarial_verifier 3 mutations must fail
+      - create PR draft requiring human review
+      - final report with timeline Finding->Patch->Verification->PR->Human Gate->Release Blocked
+
 routing:
   phases:
     - init

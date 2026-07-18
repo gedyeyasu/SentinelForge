@@ -9,17 +9,21 @@
 |----------|----------|------------------|
 | **START HERE** `ARCHITECTURE_DETAILED.md` | `docs/ARCHITECTURE_DETAILED.md` | 600+ lines: Tech stack table, sponsor tools deep integration table (9 sponsors), end-to-end flow for scanner vs pentest, Mermaid diagram, Cini backend test, safety boundary, demo checklist |
 | **Diagram Source** `architecture.mmd` | `docs/diagrams/architecture.mmd` | Mermaid source for architecture diagram — paste into https://mermaid.live/ to render PNG, or `npx mmdc -i architecture.mmd -o architecture.png` |
-| **Flow Finding→Patch** `FLOW_FINDING_TO_PATCH.md` | `docs/FLOW_FINDING_TO_PATCH.md` | **Answers your latest questions:** How we BLOCK destructive actions (DROP TABLE, rm -rf) but DO powerful Fable-level exploits, evidence report with Create Patch PR button, patch agent flow with verification, human review required + release blocked logic |
-| **HiddenLayer Track 3** `HIDDENLAYER_TRACK3.md` | `docs/HIDDENLAYER_TRACK3.md` | Track 3 runtime security: how we instrument every boundary (prompts, responses, tool calls, tool results, ingested content), thoughtful policy self-correction vs quarantine vs redact vs block, API key vendor link |
+| **Flow Finding→Patch** `FLOW_FINDING_TO_PATCH.md` | `docs/FLOW_FINDING_TO_PATCH.md` | How we BLOCK destructive actions (DROP TABLE, rm -rf) but DO powerful Fable-level exploits, evidence report with Create Patch PR button, patch agent flow, human review required + release blocked |
+| **NemoClaw Setup** `NEMOCLAW_SETUP.md` | `docs/NEMOCLAW_SETUP.md` | **NEW** NemoClaw persistent orchestrator, heartbeat, 14 agents roster including code_worker (works on code), pr_creator (creates PR against GitHub repo), patch_and_pr (patches after exploit successful) — per your request |
+| **GitHub OAuth** `GITHUB_OAUTH.md` | `docs/GITHUB_OAUTH.md` | **NEW** OAuth super cool one-click connect, repo listing, secure clone via GIT_ASKPASS, scan flow, Loom demo script, security considerations |
+| **Cini Live Pentest** `CINI_PENTEST_GUIDE.md` | `docs/CINI_PENTEST_GUIDE.md` | How to test pentesting tool on your Cini backend deployed on AWS https://api.cini.love/api/v1 via WebUI for Loom demo, scope-cini.yaml, ownership verification |
+| **HiddenLayer Track 3** `HIDDENLAYER_TRACK3.md` | `docs/HIDDENLAYER_TRACK3.md` | Track 3 runtime security: how we instrument every boundary (prompts, responses, tool calls, tool results, ingested content), thoughtful policy self-correction vs quarantine vs redact vs block |
 | **Safety** `SECURITY.md` | `docs/SECURITY.md` | 10 enforcement layers, what is NOT in scope, critical deterministic cases |
 | **Demo** `DEMO.md` | `docs/DEMO.md` | 4:40 timeline, one-command reset, emergency fallback, 5 rehearsals |
 | **Brev** `BREV.md` | `docs/BREV.md` | GPU instance A10G/L4, Docker Compose, bench.json 5.2x speedup, fallback |
 | **Short Arch** `ARCHITECTURE.md` | `docs/ARCHITECTURE.md` | Short ASCII diagram from PLAN §5, file layout |
 | **Plan** `PLAN.md` | `docs/PLAN.md` | Original build plan with P0/P1/P2 acceptance criteria, sponsor contract table, state model, lakes |
-| **Heartbeat** `HEARTBEAT.md` | `HEARTBEAT.md` and `.nemo/HEARTBEAT.md` | NemoClaw cursor, learning delta Run1 42 calls → Run2 14 calls -66%, advisory events |
-| **Agents Roster** `agents.yaml` | `config/agents.yaml` | 11 bounded agents (main, surface_mapper, auth_attacker, injection_attacker, exploit_writer, logic_attacker, dependency_hunter, finding_validator, patch_engineer, adversarial_verifier, release_auditor) with inputs/tools/output, routing phases |
-| **Policy** `openshell-policy.yaml` | `config/openshell-policy.yaml` | 13 rules deny-by-default, now includes DB nuking blocked (DROP TABLE, TRUNCATE, DELETE without WHERE) |
+| **Heartbeat** `HEARTBEAT.md` | `HEARTBEAT.md` and `.nemo/HEARTBEAT.md` | NemoClaw cursor, learning delta Run1 42 calls → Run2 14 calls -66%, advisory events, roster + code_worker + pr_creator + patch_and_pr |
+| **Agents Roster** `agents.yaml` | `config/agents.yaml` | **14 agents** now including code_worker (works on code), pr_creator (creates PR against GitHub repo), patch_and_pr (patches after exploit successful) per your request — was 11 |
+| **Policy** `openshell-policy.yaml` | `config/openshell-policy.yaml` | 13 rules deny-by-default, includes DB nuking blocked (DROP TABLE, TRUNCATE, DELETE without WHERE), plus cini policy allows api.cini.love |
 | **Supabase Schema** `supabase_schema.sql` | `docs/supabase_schema.sql` | Multi-tenant RLS for SaaS: orgs, memberships, api_keys, audit_logs, vex_documents, agent_traces |
+| **.env Placeholders** `.env` | `.env` | Now has GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET placeholders for you to paste — plus GITHUB_TOKEN, NVIDIA_API_KEY, HIDDENLAYER_CLIENT_ID/SECRET, etc. |
 
 ## 60-Second How It Works
 
