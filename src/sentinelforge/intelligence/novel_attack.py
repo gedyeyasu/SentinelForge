@@ -585,13 +585,59 @@ class NovelAttackSynthesizer:
                 continue
             duration_ms = int((time.monotonic() - started) * 1000)
             outcome = self._evaluate(hypothesis, step, response)
+            cross_tenant_data = False
+            owner_body_hash = ""
+            if outcome is ExploitOutcome.SUCCESS and owner_identity and attacker_identity:
+                cross_tenant_data, owner_body_hash = self._check_cross_tenant(
+                    step, owner_identity, response
+                )
             receipts.append(
                 self._receipt(
                     hypothesis, step, headers, identity_name,
                     response.status_code, response.body, outcome, duration_ms,
+                    extra={
+                        "cross_tenant_data": cross_tenant_data,
+                        "owner_body_sha256": owner_body_hash,
+                    },
                 )
             )
         return receipts
+
+    def _check_cross_tenant(
+        self,
+        step: AttackStep,
+        owner_identity: TestIdentity,
+        attacker_response: Any,
+    ) -> tuple[bool, str]:
+        """Compare attacker's response with owner's to detect cross-tenant data access.
+
+        A real BOLA means both identities receive the same data — the attacker
+        can read another tenant's resource. If responses differ substantially
+        (one gets the resource, the other gets 404/403), it's not cross-tenant.
+        """
+        try:
+            owner_headers = dict(step.headers)
+            owner_headers.update(owner_identity.auth_header())
+            owner_resp = self._client.request(
+                step.method, step.url,
+                headers=owner_headers, content=step.body,
+            )
+            owner_hash = hashlib.sha256(
+                (owner_resp.body or "").encode()
+            ).hexdigest()
+            attacker_hash = hashlib.sha256(
+                (attacker_response.body or "").encode()
+            ).hexdigest()
+            if (
+                attacker_response.status_code == 200
+                and owner_resp.status_code == 200
+                and attacker_hash == owner_hash
+                and len(attacker_response.body or "") > 20
+            ):
+                return True, owner_hash
+            return False, owner_hash
+        except Exception:
+            return False, ""
 
     @staticmethod
     def _evaluate(
@@ -619,7 +665,9 @@ class NovelAttackSynthesizer:
         body: str,
         outcome: ExploitOutcome,
         duration_ms: int,
+        extra: dict[str, Any] | None = None,
     ) -> ExploitReceipt:
+        extra = extra or {}
         finding_id = f"novel-{hypothesis.attack_class}-{hypothesis.hypothesis_id[-6:]}"
         return ExploitReceipt(
             receipt_id="rcpt_" + uuid.uuid4().hex[:12],
@@ -637,11 +685,25 @@ class NovelAttackSynthesizer:
                 f"{hypothesis.title}"
             ),
             observed_behavior=(
-                f"[{hypothesis.source}] {hypothesis.title} -> HTTP {status}. "
-                f"{hypothesis.rationale[:200]}"
+                (
+                    "⚠️ CROSS-TENANT DATA LEAKED: Attacker accessed owner's resource. "
+                    if extra.get("cross_tenant_data")
+                    else ""
+                )
+                + f"[{hypothesis.source}] {hypothesis.title} -> HTTP {status}. "
+                + (
+                    f"Body hash matches owner (SHA-256: {extra['owner_body_sha256'][:16]}...). "
+                    f"{hypothesis.rationale[:120]}"
+                    if extra.get("cross_tenant_data")
+                    else hypothesis.rationale[:200]
+                )
             ),
             outcome=outcome,
-            confidence=0.85 if outcome is ExploitOutcome.SUCCESS else 0.5,
+            confidence=(
+                0.95 if extra.get("cross_tenant_data")
+                else 0.85 if outcome is ExploitOutcome.SUCCESS
+                else 0.5
+            ),
             replay_command=generate_replay_command(
                 step.method, step.url, headers, step.body
             ),
