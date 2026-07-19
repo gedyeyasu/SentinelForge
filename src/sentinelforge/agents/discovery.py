@@ -87,20 +87,29 @@ class OpenAPIRouteDiscovery:
 
     @staticmethod
     def _parse_openapi(spec: dict[str, Any], base_url: str) -> list[DiscoveredRoute]:
+        from urllib.parse import urlparse
+
+        base_path = urlparse(base_url).path.rstrip("/")
         paths = spec.get("paths", {})
         routes: list[DiscoveredRoute] = []
         for path, methods in paths.items():
             if not isinstance(methods, dict):
                 continue
+            # Avoid double-joining when spec paths already include the
+            # base path prefix (e.g. spec served at domain root while
+            # base_url includes /api/v1).
+            route_path = path
+            if base_path and path.startswith(base_path + "/"):
+                route_path = path[len(base_path):]
             path_params = tuple(
-                param for param in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", path)
+                param for param in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", route_path)
             )
             for method in ("get", "post", "put", "patch", "delete"):
                 if method in methods:
                     routes.append(
                         DiscoveredRoute(
                             method=method.upper(),
-                            path=path,
+                            path=route_path,
                             function_name="",
                             source_file="openapi",
                             path_params=path_params,
