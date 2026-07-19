@@ -25,18 +25,65 @@ class DiscoveredRoute:
 
 
 class OpenAPIRouteDiscovery:
+    # Suffixes tried relative to base_url, then relative to the domain root
+    # (drf-spectacular and many gateways serve the schema at the root).
+    _BASE_SUFFIXES = ("/openapi.json", "/docs/openapi.json")
+    _ROOT_SUFFIXES = (
+        "/openapi.json",
+        "/api/schema/",
+        "/api/schema/openapi.json",
+        "/api/docs/openapi.json",
+    )
+
     def discover_from_url(
         self, base_url: str, client: httpx.Client | None = None
     ) -> list[DiscoveredRoute]:
+        from urllib.parse import urlparse
+
         client = client or httpx.Client(timeout=10, follow_redirects=True)
-        for suffix in ("/openapi.json", "/docs/openapi.json"):
+        base = base_url.rstrip("/")
+        parsed = urlparse(base)
+        root = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else ""
+
+        candidates = [base + s for s in self._BASE_SUFFIXES]
+        if root and root != base:
+            candidates.extend(root + s for s in self._ROOT_SUFFIXES)
+        elif root:
+            candidates.extend(root + s for s in self._ROOT_SUFFIXES if s != "/openapi.json")
+
+        for url in candidates:
             try:
-                response = client.get(base_url.rstrip("/") + suffix)
+                response = client.get(
+                    url,
+                    headers={
+                        "Accept": (
+                            "application/vnd.oai.openapi+json, "
+                            "application/json, application/yaml, text/yaml"
+                        )
+                    },
+                )
                 response.raise_for_status()
-                return self._parse_openapi(response.json(), base_url)
+                spec = self._parse_spec_body(response)
+                if isinstance(spec, dict) and spec.get("paths"):
+                    return self._parse_openapi(spec, base)
             except (httpx.HTTPError, ValueError, KeyError):
                 continue
         return []
+
+    @staticmethod
+    def _parse_spec_body(response: httpx.Response) -> dict[str, Any] | None:
+        """Parse an OpenAPI spec served as JSON or YAML (drf-spectacular)."""
+        try:
+            return response.json()
+        except ValueError:
+            pass
+        try:
+            import yaml
+
+            parsed = yaml.safe_load(response.text)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
 
     @staticmethod
     def _parse_openapi(spec: dict[str, Any], base_url: str) -> list[DiscoveredRoute]:
