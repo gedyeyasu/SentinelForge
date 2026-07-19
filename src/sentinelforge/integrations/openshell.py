@@ -165,12 +165,33 @@ class OpenShellPolicyEngine:
         return self.check(f"subprocess: {command}")
 
 
+def _substitute_env(text: str) -> str:
+    """Expand ${VAR} and ${VAR:-default} references from the environment.
+
+    Lets a checked-in policy stay environment-agnostic (localhost for dev,
+    scoped staging host in production) without templating engines.
+    """
+    import os
+    import re
+
+    def _replace(match: re.Match[str]) -> str:
+        var = match.group(1)
+        default = match.group(3)
+        value = os.environ.get(var, "").strip()
+        if value:
+            return value
+        return default if default is not None else match.group(0)
+
+    return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}", _replace, text)
+
+
 def load_policy(path: Path) -> OpenShellPolicy:
     path = path.resolve()
     if not path.is_file():
         raise FileNotFoundError(f"Policy file not found: {path}")
 
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw_text = _substitute_env(path.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(raw_text)
     if not isinstance(raw, dict):
         raise ValueError("Policy file must contain a YAML mapping")
 

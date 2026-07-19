@@ -22,6 +22,14 @@ services:
         value: https://sentinelforge.onrender.com/api/github/oauth/callback
       - key: NVIDIA_API_KEY
         sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: PENTEST_TARGET_HOST
+        value: api\.cini\.love
+      - key: CINI_OWNER_JWT
+        sync: false
+      - key: CINI_ATTACKER_JWT
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SECRET_KEY

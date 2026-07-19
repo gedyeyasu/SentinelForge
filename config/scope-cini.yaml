@@ -60,16 +60,15 @@ test_identities:
   - name: "owner"
     tenant_id: "tenant-a"
     headers:
-      # Replace with real Cini test user 1 token
-      # Get token via: curl -X POST https://api.cini.love/api/v1/auth/login -d '{"email":"test1@cini.love","password":"..."}'
-      Authorization: "Bearer REPLACE_WITH_TEST_USER_1_JWT"
-      x-user-id: "test-user-1-id"
+      # Set via env: CINI_OWNER_JWT (get token by logging in as test user 1)
+      Authorization: "Bearer ${CINI_OWNER_JWT:-REPLACE_WITH_TEST_USER_1_JWT}"
+      x-user-id: "${CINI_OWNER_ID:-test-user-1-id}"
   - name: "attacker"
     tenant_id: "tenant-b"
     headers:
-      # Replace with real Cini test user 2 token
-      Authorization: "Bearer REPLACE_WITH_TEST_USER_2_JWT"
-      x-user-id: "test-user-2-id"
+      # Set via env: CINI_ATTACKER_JWT (get token by logging in as test user 2)
+      Authorization: "Bearer ${CINI_ATTACKER_JWT:-REPLACE_WITH_TEST_USER_2_JWT}"
+      x-user-id: "${CINI_ATTACKER_ID:-test-user-2-id}"
 
 # Kill switch - immediate abort
 kill_switch_file: ".sentinelforge/STOP"

@@ -18,6 +18,7 @@ allowed_hosts:
   - 127.0.0.1
   - localhost
   - 0.0.0.0
+  - ${PENTEST_TARGET_HOST:-__no_external_target__}
 forbidden_paths:
   - /etc
   - /var
@@ -33,10 +34,10 @@ forbidden_paths:
 rules:
   - action: deny
     description: Block production host access
-    match: 'http[s]?://(?!127\.0\.0\.1|localhost|0\.0\.0\.0)(?!.*\.staging\.internal).*'
+    match: 'http[s]?://(?!127\.0\.0\.1|localhost|0\.0\.0\.0|${PENTEST_TARGET_HOST:-__no_external_target__})(?!.*\.staging\.internal).*'
     category: network
     severity: critical
-    remediation: Use only allowed_hosts from scope.yaml (127.0.0.1, localhost)
+    remediation: Use only allowed_hosts from scope.yaml (127.0.0.1, localhost). Set PENTEST_TARGET_HOST to authorize a staging host.
 
   - action: deny
     description: Block private network access beyond sandbox
@@ -109,8 +110,8 @@ rules:
     severity: critical
 
   - action: allow
-    description: Allow local staging requests
-    match: 'http[s]?://(127\.0\.0\.1|localhost|0\.0\.0\.0)(:\d+)?(/.*)?$'
+    description: Allow local staging requests and env-authorized target host
+    match: 'http[s]?://(127\.0\.0\.1|localhost|0\.0\.0\.0|${PENTEST_TARGET_HOST:-__no_external_target__})(:\d+)?(/.*)?$'
     category: network
     severity: info
 

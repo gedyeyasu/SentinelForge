@@ -131,11 +131,26 @@ def _validate_identity(raw: dict[str, Any], index: int) -> TestIdentity:
     return TestIdentity(name=name, tenant_id=tenant_id, headers=headers)
 
 
+def _substitute_env(text: str) -> str:
+    """Expand ${VAR} and ${VAR:-default} references from the environment."""
+    import os
+
+    def _replace(match: re.Match[str]) -> str:
+        var = match.group(1)
+        default = match.group(3)
+        value = os.environ.get(var, "").strip()
+        if value:
+            return value
+        return default if default is not None else match.group(0)
+
+    return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}", _replace, text)
+
+
 def load_scope(path: Path) -> ScopeConfig:
     path = path.resolve()
     if not path.is_file():
         raise ScopeValidationError(f"Scope file not found: {path}")
-    raw_text = path.read_text(encoding="utf-8")
+    raw_text = _substitute_env(path.read_text(encoding="utf-8"))
     try:
         raw: Any = yaml.safe_load(raw_text)
     except yaml.YAMLError as error:

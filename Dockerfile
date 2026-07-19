@@ -54,6 +54,8 @@ USER appuser
 # Env defaults (override via deployment platform env vars)
 ENV SENTINELFORGE_ALLOWED_ROOTS=/app
 ENV SENTINELFORGE_DB_PATH=/app/.sentinelforge/control.db
+ENV SENTINELFORGE_HOST=0.0.0.0
+ENV PORT=8741
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 

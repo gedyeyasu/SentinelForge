@@ -13,9 +13,9 @@ primary_region = "iad"
 [http_service]
   internal_port = 8741
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ["app"]
 
   [http_service.concurrency]
@@ -53,7 +53,7 @@ primary_region = "iad"
     path = "/health"
 
 # Mount volume for persistent storage (exploits, attestations, db, keys)
-# Uncomment after creating volume: fly volumes create sentinelforge_data --region iad --size 10
-# [[mounts]]
-#   source = "sentinelforge_data"
-#   destination = "/app/.sentinelforge"
+# Create once with: fly volumes create sentinelforge_data --region iad --size 1
+[[mounts]]
+  source = "sentinelforge_data"
+  destination = "/app/.sentinelforge"
