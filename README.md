@@ -140,6 +140,8 @@ SentinelForge scans both framework types automatically:
 
 The Django detector parses `urls.py` patterns, identifies views that load objects without ownership checks, and flags potential broken object-level authorization (BOLA) vulnerabilities.
 
+**Language coverage:** live adversarial testing (route mapping, auth/injection attacks, novel attack synthesis) is language-agnostic — it works against any target exposing an OpenAPI spec (`/openapi.json`), including Express and Spring Boot services. Deep source-level BOLA detection (AST analysis of handlers for missing ownership guards) ships for FastAPI and Django today; Express and Spring detectors are on the roadmap.
+
 ## GitHub integration
 
 Connect to GitHub to list repositories, clone them, and scan remotely:
