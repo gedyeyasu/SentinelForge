@@ -34,7 +34,7 @@ cp .env.example .env   # fill in your keys - now has placeholders for GitHub OAu
 
 ## Active pentesting
 
-SentinelForge includes a full multi-agent pentest orchestrator with 6 enterprise modes and **15 phases** including custom exploit writer:
+SentinelForge includes a full multi-agent pentest orchestrator with 6 enterprise modes and **17 autonomous phases** including live agent swarms and novel attack synthesis:
 
 ```bash
 # Run a standard pentest against a staging target (includes custom exploit writer that writes new Python file per run)
@@ -80,23 +80,25 @@ SentinelForge includes a full multi-agent pentest orchestrator with 6 enterprise
 
 ### Agent phases
 
-Each pentest run executes these phases sequentially (15 phases):
+Each pentest run executes these phases sequentially (17 phases). Auth, injection, and zero-day phases run in parallel via the **AgentSwarm** (token-bucket rate-limited, kill-switch-respecting worker pool with SSE lifecycle events):
 
-1. **Init** - Initialize run state
+1. **Init** - Initialize run state, engagement memory, adaptive payload generator
 2. **Ownership verification** - Challenge-response proof (file, DNS, HTTP, API endpoint) — ACME-style, required for external targets
-3. **Environment check** - Detect dev/staging/production via URL, headers, content signals — blocks prod unless explicitly allowed
-4. **Scoping** - Validates target boundaries, allowed hosts, rate limits (3 rps default, 1 rps for live prod Cini), kill-switch `.sentinelforge/STOP`
-5. **Mapping** - Discovers API routes via OpenAPI + AST FastAPI scanner + **DjangoRouteDiscovery** (parses `urls.py` `<int:pk>/<str:token>/<uuid:event_id>` → `{pk}`) — now works for Cini backend
-6. **Dependency scan** - Cross-references packages against Red Hat Security Data API, SBOM CycloneDX/SPDX parsing, VEX reachability call-graph, no-impact evidence
-7. **Pattern scan** - Detects 18 code-level exploit patterns (hardcoded secrets, unsafe deserialization, etc.)
-8. **Auth attack** - Cross-tenant BOLA with **7 techniques**: direct_bola, id_enumeration 0,1,2,999, header x-tenant-id injection, JWT tenant swap, verb tamper PUT/PATCH/POST, param pollution
-9. **Injection attack** - **10 static payloads + 10 Nemotron synthetic per route + 3 mutations** (prompt injection, SQLi, XSS, SSRF, traversal)
-10. **Custom exploit** - **Writes NEW Python exploit file per run per route to `.sentinelforge/exploits/{run_id}/`** using Nemotron code gen, executes via sys.executable, generates receipt — **PROOF NOT TOY**, visible in dashboard blue highlight with file badge
-11. **HiddenLayer scan** - **Track 3 deep instrumentation:** prompts, responses, tool calls, tool results, ingested content via `client.runtime.evaluate_interaction()` SDK v2, signals prompt_injection, pii, code, dos, url, thoughtful policy self-correction/quarantine/redact/block
-12. **OpenShell audit** - Policy enforcement verification with external YAML `config/openshell-policy.yaml` (13 rules deny-by-default, blocks DROP TABLE, TRUNCATE, DELETE without WHERE, rm -rf, etc., allows api.cini.love for live demo)
-13. **NIM analysis** - NVIDIA Nemotron threat assessment of all findings, risk_level, CVSS, attack_vectors, recommendations, token trace per agent
-14. **Attestation** - Produces signed release verdict with HMAC hash chain, adversarial verification 3 mutations blocked, VEX doc, SARIF, Check Runs, PR requiring human review
-15. **Complete** - Final report: Finding → Patch → Verification → PR → Human Gate → Release BLOCKED
+3. **Environment check** - Detect dev/staging/production, blocks prod unless explicitly allowed
+4. **Scoping** - Validates target boundaries + **provisions synthetic test identities** on the target (auto-registers run-scoped accounts via public registration endpoint — JWT tokens never expire under cini's 24h policy)
+5. **CVE Intelligence** - Ingests NVD/KEV/EPSS feeds + enriches via OSV.dev and GitHub Security Advisories; deduplicated, KEV-prioritized rankings
+6. **Mapping** - Discovers API routes via OpenAPI 3.x (JSON and YAML), root-relative + base-relative schema probing, AST FastAPI + Django `urls.py` parsing
+7. **Dependency scan** - Red Hat CSAF/OVAL SBOM + VEX reachability call-graph + no-impact evidence
+8. **Pattern scan** - 18 code-level exploit patterns (hardcoded secrets, unsafe deserialization, etc.)
+9. **Threat Learning** - Pattern extraction from ingested CVEs and prior scan results
+10. **Auth attack** — **AgentSwarm** parallel BOLA with 7 techniques per route
+11. **Injection attack** — **AgentSwarm** parallel injection; Thompson Sampling selects payloads; effectiveness tracked per category
+12. **Zero-day hunting** — **LLM-reasoned novel attack synthesis** (Nemotron proposes hypotheses from route map + source context + CVE intel) + composition engine (15 primitives: ID smuggling, param pollution, mass assignment, type juggling, auth-context smuggling, race conditions, method override, content-type confusion). **AgentSwarm** executes all hypotheses in parallel; novelty-scored against engagement memory.
+13. **Custom exploit** - Writes NEW Python exploit file per run via Nemotron code gen, executed, receipt generated
+14. **HiddenLayer scan** - Track 3 runtime security: prompts/responses/tool calls/tool results/ingested content via SDK v2
+15. **OpenShell audit** - Policy enforcement: 18-rule deny-by-default, blocks DROP TABLE/TRUNCATE/DELETE without WHERE/rm -rf, denies visible in SSE feed (red highlight)
+16. **NIM analysis** - Nemotron threat assessment consuming CVE intel + threat patterns + zero-day hypotheses; risk_level, CVSS, attack_vectors
+17. **Attestation** - Signed release verdict with HMAC hash chain, adversarial verification 3 mutations blocked, VEX doc, evidence bundle with hashes + replay commands, learning delta recorded in persistent memory for run-over-run comparison
 
 ## NVIDIA Nemotron patch worker + vLLM
 
@@ -336,8 +338,8 @@ Supports file, DNS TXT, HTTP endpoint, API endpoint challenge types. For live Ci
 | **GitHub** | OAuth super cool one-click connect with secure token storage 600 perms, repo listing with search/sort/filter, secure clone via GIT_ASKPASS (no URL leak), scan via SSE live feed, Check Runs annotations at file:line (beats Snyk), SARIF 2.1.0, PR draft requiring human review | `/api/github/oauth/start` popup authorize, `/api/github/repos?limit=30&search=cini`, Scan tab repo list with private 🔒, Scan GitHub repo button |
 | **NVIDIA Nemotron/NIM** | Agent reasoning, threat analysis, patch generation, payload synthesis 10 novel per route, custom exploit code generation (Python file per run), token trace per agent | `/api/pentest/{id}/traces` shows input_tokens/output_tokens/latency/cost per agent, dashboard token burn, threat assessment risk_level, CVSS |
 | **vLLM** | Concurrent worker inference + bench sequential vs batched latency chart + fallback per PLAN §17 | `sentinelforge vllm-health`, `bench` CLI produces `.sentinelforge/bench.json` speedup 5.2x, `docs/BREV.md` manifest |
-| **NemoClaw** | Persistent orchestrator 14 agents, heartbeat file, target_memory learning delta Run1 42 calls → Run2 14 calls -66%, fixed roster in `config/agents.yaml`, advisory_cursor dedup | `config/agents.yaml` 14 agents, `HEARTBEAT.md` + `.nemo/HEARTBEAT.md` with last_cursor, advisories_seen, learning delta, `/api/agents` serves roster, `/api/heartbeat` |
-| **OpenShell** | Policy-enforced execution sandboxes with deny-by-default, 13 rules blocking DROP TABLE, TRUNCATE, DELETE without WHERE, rm -rf, private nets, exfil, reverse shells, DoS, prod hosts, but allowing api.cini.love for live demo | `config/openshell-policy.yaml` externalized, `config/openshell-policy-cini.yaml` allows api.cini.love, OpenShellPolicyEngine audit_log with denied_examples, dashboard red badge for denied, `/api/integrations` openshell active |
+| **NemoClaw** | Persistent orchestrator 14 agents, heartbeat file, target_memory real learning delta from measured run-over-run metrics, fixed roster in `config/agents.yaml`, advisory_cursor dedup | `config/agents.yaml` 14 agents, `HEARTBEAT.md` + `.nemo/HEARTBEAT.md` with last_cursor, advisories_seen, learning delta, `/api/agents` serves roster, `/api/heartbeat` |
+| **OpenShell** | Policy-enforced execution sandboxes with deny-by-default, 18 rules blocking DROP TABLE, TRUNCATE, DELETE without WHERE, rm -rf, private nets, exfil, reverse shells, DoS, prod hosts, but allowing api.cini.love for live demo | `config/openshell-policy.yaml` externalized, `config/openshell-policy-cini.yaml` allows api.cini.love, OpenShellPolicyEngine audit_log with denied_examples, dashboard red badge for denied, `/api/integrations` openshell active |
 | **HiddenLayer** | **Track 3 deep instrumentation:** prompts, responses, tool calls, tool results, ingested content via SDK v2 `client.runtime.evaluate_interaction()`, signals prompt_injection, pii, code, dos, url, thoughtful policy self-correction/quarantine/redact/block | `src/sentinelforge/integrations/hiddenlayer_runtime.py` HiddenLayerRuntimeSecurity with session_id grouping, `docs/HIDDENLAYER_TRACK3.md`, fallback chain v2 → v1 API → local 35 patterns, quarantine banner in dashboard |
 | **Red Hat Security Data API** | Live CVE/CSAF/OVAL intelligence, SBOM CycloneDX/SPDX parsing, VEX reachability call-graph (not just import grep), no-impact evidence, advisory_cursor dedup, VEX doc generation | `/api/intelligence/redhat?package=cryptography`, dashboard Intelligence panel, `.sentinelforge/vex_{run_id}.json`, events `no_impact_evidence`, `dependency_scan_completed` with vex_evaluated count |
 | **Supabase** | Cloud persistence for pentest results, run history, multi-tenant RLS orgs/memberships/api_keys, agent_traces | `docs/supabase_schema.sql` with 11 tables, env SUPABASE_URL, cloud persistence optional SQLite fallback |
@@ -429,7 +431,7 @@ SentinelForge targets only explicitly authorized staging environments and contro
 - Dependency vulnerability cross-referencing against Red Hat advisories + SBOM CycloneDX/SPDX + VEX reachability call-graph + no-impact evidence + advisory_cursor dedup
 - Code-level exploit pattern detection (18 patterns)
 - **Track 3 HiddenLayer runtime security:** Full depth — prompts, responses, tool calls (HTTP requests), tool results (HTTP responses), ingested content (repo files, SBOM, custom exploit code) via SDK v2 `client.runtime.evaluate_interaction()` with session_id grouping, signals prompt_injection, pii, code, dos, url, thoughtful policy self-correction (withhold flagged content, send security notice so model self-corrects) / quarantine / redact / block+escalate
-- Policy enforcement via OpenShell with external YAML 13 rules deny-by-default, blocks DROP TABLE, TRUNCATE, DELETE without WHERE, rm -rf, etc., but allows api.cini.love for live demo via cini policy
+- Policy enforcement via OpenShell with external YAML 18 rules deny-by-default, blocks DROP TABLE, TRUNCATE, DELETE without WHERE, rm -rf, etc., but allows api.cini.love for live demo via cini policy
 - Enterprise ownership verification (ACME-style challenge-response) file/DNS/HTTP/API endpoint, required for external targets
 - Deployment environment detection (dev/staging/production) with confidence, blocks prod unless explicitly allowed
 - CVE intelligence ingestion from NVD, KEV, EPSS feeds + threat learning + adaptive payloads Thompson Sampling + engagement memory persistent across scans + zero-day hypothesis-driven exploration
@@ -437,7 +439,7 @@ SentinelForge targets only explicitly authorized staging environments and contro
 - **Check Runs + SARIF:** Creates Check Run with annotation at file:line for vulnerable lines (beats Snyk), generates SARIF 2.1.0 and uploads to code scanning
 - Automated PR generation with draft requiring human review (no auto-merge per `no_agent_can_merge_pr: true`), branch protection requiring 1 approver, attestation human_approval_required true, release BLOCKED until approved if functionality change
 - CI/CD pipeline generation with built-in security gates, SARIF upload, Check Runs, human gate
-- **Learning delta:** Persistent memory target_memory reduces tool calls 66% second run, auth discovery 73% faster, token cost 66% less — proving NemoClaw learning, not static
+- **Learning delta:** Persistent target_memory records real per-run metrics (routes, receipts, duration, tool calls, tokens from agent_traces) and computes run-over-run deltas. Requires 2+ completed runs — honest "insufficient data" when no comparison exists. Heartbeat renders measured deltas, not projections.
 - **Signed attestation:** HMAC hash chain with prev_hash linking, evidence hash, signature, public key, stored in `.sentinelforge/attestations/attestation_{run_id}.json`, tamper detection
 - Release security attestation with evidence hashes, VEX doc, SARIF, Check Runs, PR URL, human review gate
 
@@ -470,18 +472,32 @@ sentinelforge/
     github_oauth.py # NEW: OAuth manager with state CSRF, token storage 600 perms, authorize URL, exchange code, safe dict
     hiddenlayer.py  # Prompt injection scanning (v1 fallback) + 35 pattern local
     hiddenlayer_runtime.py # NEW: Track 3 runtime security SDK v2 client.runtime.evaluate_interaction(), prompts/responses/tool calls/tool results/ingested content, thoughtful policy self-correction/quarantine/redact/block
-    openshell.py    # Policy enforcement with get_policy() env path, 13 rules + DB nuking blocked
+    openshell.py    # Policy enforcement with get_policy() env path, 18 rules + DB nuking blocked
     red_hat.py      # Security data API with CSAF + OVAL + VEX
     supabase.py     # Cloud persistence
   nemoclaw/         # NEW: NemoClaw persistent orchestrator
     orchestrator.py # NemoClawOrchestrator extends AgentOrchestrator with target_memory, heartbeat tick, learning delta, roster proof
     heartbeat.py    # NemoClawHeartbeat reads Red Hat CSAF, matches dependency inventory, writes HEARTBEAT.md
-  intelligence/     # Adaptive threat intelligence engine
-    cve_ingestion.py    # NVD/KEV/EPSS feed ingestion
-    threat_learning.py  # Pattern extraction from CVEs and scans
-    adaptive_payloads.py # Thompson Sampling-inspired payload selection
-    engagement_memory.py # Persistent memory across engagements
-    zero_day_hunter.py  # Hypothesis-driven vulnerability exploration
+   intelligence/     # Adaptive threat intelligence engine
+     cve_ingestion.py    # NVD/KEV/EPSS feed ingestion
+     threat_learning.py  # Pattern extraction from CVEs and scans
+     adaptive_payloads.py # Thompson Sampling-informed payload selection
+     engagement_memory.py # Persistent memory across engagements
+     zero_day_hunter.py  # Hypothesis-driven vulnerability exploration
+     aggregator.py      # Multi-source CVE merge (OSV.dev + GitHub Advisories)
+     novel_attack.py    # LLM-reasoned attack chains + composition engine (15 primitives)
+   swarm/            # Parallel multi-agent attack execution
+     swarm.py           # AgentSwarm: async worker pool, token-bucket rate limit, SSE lifecycle
+   identity/         # Dynamic test identity provisioning
+     provisioner.py     # Auto-registers run-scoped test accounts on the target
+   evidence/         # Structured evidence capture
+     bundle.py          # EvidenceBundle: SHA-256 receipts + Markdown team report
+   patchflow/        # Autonomous patch-PR pipeline
+     pr_agent.py        # Finding → patch (NIM→vLLM) → verify → draft PR flow
+   inference/        # NIM + vLLM patch proposals
+     nvidia_nim.py      # NVIDIA NIM adapter
+     vllm.py            # vLLM adapter
+     fallback.py        # FallbackPatchProposer: NIM → vLLM failover
   monitoring/       # Continuous security monitoring
     continuous_scanner.py # Scheduled scan management
     threat_feed.py   # Multi-source threat feed aggregation
@@ -501,7 +517,7 @@ sentinelforge/
     index.html      # Added OAuth connect area, repos list container, filter input, evidence list, final report panel, human review gate panel
     app.js          # 1200+ lines: scan tabs, GitHub OAuth popup with postMessage, repo listing with private 🔒, Scan button auto-fill, SSE live feed, custom_exploit_written blue highlight, PR button flow, final report 8 steps, human gate
     app.css         # Forensic command instrument + highlight-exploit blue, highlight-execution yellow, exploit-file-badge mono, live-custom events
-  orchestrator.py   # Phase-based agent orchestration 15 phases including custom_exploit, ownership, environment
+  orchestrator.py   # Phase-based agent orchestration 17 phases including intelligence and swarms, ownership, environment
   pentest.py        # Pentest service with ownership/environment handlers, custom_exploit handler writes Python file, executes, emits custom_exploit_written/executed events, SBOM+VEX+no-impact, OpenShell denied visible, NIM threat analysis, attestation signed + adversarial verifier 3 mutations + redacted receipts
   pentest_modes.py  # 6 enterprise modes with custom_exploit flag (except quick), ownership/environment flags, 1 rps for live prod Cini
   scheduler.py      # Recurring scan scheduler + heartbeat tick
@@ -564,10 +580,41 @@ We have `Dockerfile` (Python 3.12 slim, non-root appuser, git + gh CLI, healthch
 
 See `docs/DEPLOYMENT.md` for Fly.io, Render, AWS App Runner, Supabase schema deploy via SQL Editor.
 
-## Iteration policy
+## Datasets & Synthetic Data
 
-Every implementation must pass its relevant checks before it is committed and pushed. Each iteration should be independently demoable or provide a verified foundation for the next vertical slice. Tests 233 passed.
+This project uses **no external datasets or training data**. All test artifacts are synthetic and self-contained:
+
+- **`examples/vulnerable_shop`** — A minimal FastAPI shop built specifically for this project. Contains a seeded BOLA vulnerability (`GET /orders/{order_id}` returns cross-tenant data) and synthetic test identities (`tenant-a-user`, `tenant-b-user`). The `ORDERS` dictionary is hardcoded mock data (two orders with different tenant associations).
+- **`config/scope.yaml`** — Synthetic test identities with static headers (no real user data).
+- **Dynamic provisioning** — The identity provisioner creates run-scoped fake accounts on the target using reserved `.invalid` TLD email addresses (`sf-{run_id}-owner@sentinelforge-test.invalid`) — these are never real mailboxes.
+- **Cini Backend** (`Cini-Labs/Cini-BackEnd`) — The user's own deployed Django dating app. Scan/demo accesses its public API and Django source with the owner's explicit authorization and an ownership-verified scope. Attacks use dynamically provisioned synthetic accounts, not real user data.
+
+**No real user data, credentials, or PII is ingested, stored, or exposed.** Secrets (API keys, JWTs) in env vars are gitignored via `.gitignore`. Receipts written to DB are redacted before storage (Bearer tokens, api keys, private keys scrubbed).
+
+## Known Limitations
+
+- **NemoClaw + OpenShell integration** is convention-based (YAML policy + homegrown enforcement engine) rather than vendor SDKs. The deny-by-default policy is genuinely enforced on all outbound HTTP, file writes, and subprocess calls; the integration badge is the checked-in `agents.yaml` roster + `HEARTBEAT.md` heartbeat.
+- **Deep source-level BOLA detection** (AST analysis of handler ownership guards) supports FastAPI and Django only. Live adversarial testing (route mapping, auth/injection attacks, novel attack synthesis) works against **any** target exposing an OpenAPI 3.x spec, including Express and Spring Boot. Node.js/Java AST detectors are next.
+- **vLLM integration** has a working HTTP client and NIM→vLLM failover architecture, but no live GPU benchmark artifact — the Brev GPU host was not provisioned within the 36-hour sprint. The sequential-vs-batched performance claim in the bench doc is informational.
+- **Django BOLA detector** flags views that load objects by ID without explicit ownership checks. Public views (e.g., invite landing pages) may be false positives; each finding requires human triage as designed.
+- **Attestation signing** uses `hmac-sha256-demo` (real hash chain, demo-grade crypto key) — production would use Ed25519 or a KMS-backed key.
+- **SSE streaming** requires a persistent connection (works on Fly with `min_machines_running=1`). Page refresh while a run is in-progress is handled via localStorage resume.
+
+## Next Steps (Post-Hackathon)
+
+1. **Express & Spring Boot BOLA detectors** — extend the source-level AST to Node.js/Java.
+2. **vLLM benchmark artifact** — provision a Brev GPU instance, run `sentinelforge bench`, publish latency chart.
+3. **Supabase Postgres backend** — replace the demo SQLite store with the already-drafted Supabase schema (11 tables in `docs/supabase_schema.sql`) for multi-tenant SaaS.
+4. **Redis pub/sub EventBus** — replace in-memory SimpleQueue for multi-machine SSE streaming.
+5. **Ed25519 attestation signing** — upgrade from `hmac-sha256-demo` to real key-based signatures with a KMS adapter.
+6. **OpenShell SDK integration** — replace the regex engine with the official OpenShell SDK when available.
+7. **Real learning delta benchmarks** — accumulate metrics across many runs per target to surface statistically significant improvements (warm routes, payload selection convergence).
+8. **CI/CD native integration** — one-click GitHub App install in CI/CD marketplaces.
+
+## Test Suite
+
+267 tests passing across 36 test files covering detectors, pentest, orchestrator, control plane, NIM, OpenShell, event bus (cross-thread regression), run deadline, PR generation, GitHub, intelligence, swarm, novel attacks, evidence bundles, identity provisioning, and enterprise hardening.
 
 ## Loom Presentation Script
 
-See `docs/LOOM_SCRIPT.md` for 4-5 minute Loom video script covering problem, vulnerable_shop BOLA, Cini backend Django BOLA, GitHub OAuth super cool flow, trigger pentest, NemoClaw roster + OpenShell scope, red agents attack 7 techniques, custom exploit writer writes new Python file (blue highlight, file badge, proves not toy), exploit SUCCESS evidence hash, HiddenLayer blocks poisoned doc, patch candidates deterministic + Nemotron + vLLM, adversarial verifier 3 mutations blocked, before/after exploit, regression test + PR with human review gate, heartbeat learning delta, close cost + commercial value.
+See `docs/LOOM_SCRIPT.md` for the 4-minute demo script.
