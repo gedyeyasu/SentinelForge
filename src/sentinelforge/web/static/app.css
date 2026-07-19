@@ -2175,3 +2175,103 @@ input:hover {
   border-left: 3px solid #f472b6;
   background: rgba(244, 114, 182, 0.06);
 }
+
+/* Fix compressed panels - attack result, timeline, final report, human review gate */
+.pentest-evidence-list {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem;
+  background: var(--panel-inset);
+}
+
+.pentest-evidence-list .finding-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  background: var(--panel);
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+}
+
+#final-report-content {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  background: var(--panel-inset);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#final-report-content ol {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+#final-report-content li {
+  margin-bottom: 0.5rem;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* Ensure evidence-grid panels are not compressed - use auto rows and min-width 0 */
+.evidence-grid .panel {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.evidence-grid .panel .panel-header {
+  flex-shrink: 0;
+}
+
+.evidence-grid .panel .panel-empty,
+.evidence-grid .panel #pentest-results-detail,
+.evidence-grid .panel #final-report-detail {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* Pentest progress bar and live feed should not be compressed */
+.pentest-progress-container,
+.pentest-live-container {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pentest-live-feed {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem;
+  background: var(--panel-inset);
+}
+
+.pentest-live-feed .live-event {
+  white-space: normal;
+  word-break: break-word;
+  min-width: 0;
+}
+
+/* SSE streaming indicator */
+.scan-log, .pentest-live-feed {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.scan-agent-activity .scan-agent-row {
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+}
