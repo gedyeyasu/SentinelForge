@@ -119,9 +119,9 @@ class HiddenLayerRuntimeSecurity:
 
         if self.config.configured_v2:
             try:
-                from hiddenlayer import HiddenlayerServiceClient
+                from hiddenlayer import Client
 
-                self._sdk_client = HiddenlayerServiceClient(
+                self._sdk_client = Client(
                     client_id=self.config.client_id,
                     client_secret=self.config.client_secret,
                 )
@@ -264,7 +264,12 @@ class HiddenLayerRuntimeSecurity:
             )
 
         except Exception as e:
-            logger.warning("HiddenLayer SDK evaluate_interaction failed: %s, falling back to local", e)
+            error_str = str(e)
+            if "401" in error_str or "Unauthorized" in error_str or "AuthenticationError" in error_str:
+                logger.info("HiddenLayer SDK credentials invalid, disabling v2 runtime for this session")
+                self._sdk_client = None
+                return None
+            logger.debug("HiddenLayer SDK evaluate_interaction failed: %s, falling back to local", e)
             return None
 
     def _decide_action(
