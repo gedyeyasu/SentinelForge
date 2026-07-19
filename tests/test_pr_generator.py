@@ -92,17 +92,22 @@ def test_apply_patches_empty(tmp_path: Path) -> None:
 
 
 def test_create_pull_request_success(tmp_path: Path) -> None:
-    gen = PRGenerator()
-    with patch("sentinelforge.pr_generator.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="https://github.com/org/repo/pull/42",
-        )
+    gen = PRGenerator(github_token="test-token")
+    mock_response = MagicMock()
+    mock_response.status_code = 201
+    mock_response.json.return_value = {
+        "number": 42,
+        "html_url": "https://github.com/org/repo/pull/42",
+    }
+    mock_response.raise_for_status = MagicMock()
+    with patch("httpx.post", return_value=mock_response):
         pr = gen.create_pull_request(
             tmp_path,
             title="Fix",
             body="Patch applied",
             head="sentinelforge/fix/test",
+            owner="org",
+            repo="repo",
         )
         assert pr is not None
         assert pr.number == 42
@@ -111,13 +116,13 @@ def test_create_pull_request_success(tmp_path: Path) -> None:
 
 
 def test_create_pull_request_failure(tmp_path: Path) -> None:
-    gen = PRGenerator()
-    with patch("sentinelforge.pr_generator.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
-        pr = gen.create_pull_request(
-            tmp_path,
-            title="Fix",
-            body="Patch applied",
-            head="sentinelforge/fix/test",
-        )
-        assert pr is None
+    gen = PRGenerator(github_token="")
+    pr = gen.create_pull_request(
+        tmp_path,
+        title="Fix",
+        body="Patch applied",
+        head="sentinelforge/fix/test",
+        owner="org",
+        repo="repo",
+    )
+    assert pr is None

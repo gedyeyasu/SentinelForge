@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -27,6 +28,7 @@ class SQLiteRunStore:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path.resolve()
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.RLock()
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -339,36 +341,37 @@ class SQLiteRunStore:
         results: dict[str, object] | None = None,
         error: str | None = None,
     ) -> PentestRunRecord:
-        current = self.get_pentest_run(run_id)
-        if current is None:
-            raise KeyError(run_id)
-        next_record = current.model_copy(
-            update={
-                "status": status or current.status,
-                "phase": phase or current.phase,
-                "candidate_verdict": candidate_verdict or current.candidate_verdict,
-                "results": results if results is not None else current.results,
-                "error": error,
-                "updated_at": utc_now(),
-            }
-        )
-        with self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE pentest_runs SET status = ?, phase = ?, candidate_verdict = ?,
-                    updated_at = ?, results_json = ?, error = ?
-                WHERE run_id = ?
-                """,
-                (
-                    next_record.status.value,
-                    next_record.phase.value,
-                    next_record.candidate_verdict.value,
-                    next_record.updated_at,
-                    json.dumps(next_record.results) if next_record.results is not None else None,
-                    next_record.error,
-                    run_id,
-                ),
+        with self._write_lock:
+            current = self.get_pentest_run(run_id)
+            if current is None:
+                raise KeyError(run_id)
+            next_record = current.model_copy(
+                update={
+                    "status": status or current.status,
+                    "phase": phase or current.phase,
+                    "candidate_verdict": candidate_verdict or current.candidate_verdict,
+                    "results": results if results is not None else current.results,
+                    "error": error,
+                    "updated_at": utc_now(),
+                }
             )
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    UPDATE pentest_runs SET status = ?, phase = ?, candidate_verdict = ?,
+                        updated_at = ?, results_json = ?, error = ?
+                    WHERE run_id = ?
+                    """,
+                    (
+                        next_record.status.value,
+                        next_record.phase.value,
+                        next_record.candidate_verdict.value,
+                        next_record.updated_at,
+                        json.dumps(next_record.results) if next_record.results is not None else None,
+                        next_record.error,
+                        run_id,
+                    ),
+                )
         return next_record
 
     def get_pentest_run(self, run_id: str) -> PentestRunRecord | None:

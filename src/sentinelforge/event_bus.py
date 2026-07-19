@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
+import queue
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -30,12 +30,18 @@ class LiveEvent:
 
 
 class EventBus:
-    """In-memory pub/sub for streaming pentest events to SSE clients."""
+    """In-memory pub/sub for streaming pentest events to SSE clients.
+
+    Uses queue.SimpleQueue, which is thread-safe: publish() is called from
+    background worker threads (pentest/scan/swarm) while SSE generators
+    drain queues from the asyncio event loop. asyncio.Queue is NOT safe
+    for that pattern — cross-thread put_nowait silently drops wakeups.
+    """
 
     _instance: EventBus | None = None
 
     def __init__(self) -> None:
-        self._subscribers: dict[str, list[asyncio.Queue[LiveEvent | None]]] = defaultdict(list)
+        self._subscribers: dict[str, list[queue.SimpleQueue]] = defaultdict(list)
         self._event_log: dict[str, list[LiveEvent]] = defaultdict(list)
 
     @classmethod
@@ -50,31 +56,29 @@ class EventBus:
         for q in queues:
             try:
                 q.put_nowait(event)
-            except asyncio.QueueFull:
-                logger.debug("Dropping event for full queue: %s", event.kind)
+            except Exception:
+                logger.debug("Dropping event for subscriber: %s", event.kind)
 
-    def subscribe(self, run_id: str) -> asyncio.Queue[LiveEvent | None]:
-        q: asyncio.Queue[LiveEvent | None] = asyncio.Queue(maxsize=256)
+    def subscribe(self, run_id: str) -> queue.SimpleQueue:
+        q: queue.SimpleQueue = queue.SimpleQueue()
         self._subscribers[run_id].append(q)
-        # Replay any existing events for this run
+        # Replay history after registering so nothing published between
+        # subscribe and replay is lost (a rare duplicate is acceptable).
         for event in self._event_log.get(run_id, []):
-            try:
-                q.put_nowait(event)
-            except asyncio.QueueFull:
-                break
+            q.put_nowait(event)
         return q
 
-    def unsubscribe(self, run_id: str, queue: asyncio.Queue[LiveEvent | None]) -> None:
+    def unsubscribe(self, run_id: str, queue_obj: queue.SimpleQueue) -> None:
         subs = self._subscribers.get(run_id, [])
-        if queue in subs:
-            subs.remove(queue)
+        if queue_obj in subs:
+            subs.remove(queue_obj)
 
     def send_done(self, run_id: str) -> None:
         queues = self._subscribers.get(run_id, [])
         for q in queues:
             try:
                 q.put_nowait(None)
-            except asyncio.QueueFull:
+            except Exception:
                 pass
 
     def get_log(self, run_id: str) -> list[LiveEvent]:

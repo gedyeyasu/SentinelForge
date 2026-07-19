@@ -345,7 +345,12 @@
 
               <div class="verdict-comparison">
                 <article class="verdict-panel candidate" id="pentest-verdict-panel"><header><span>PENTEST VERDICT</span><code id="pentest-verdict-ref">—</code></header><strong class="verdict-value" id="pentest-verdict">PENDING</strong><p id="pentest-verdict-caption">Running adversarial agents.</p></article>
-                <article class="health-panel"><span>PHASE PROGRESS</span><strong id="pentest-phase">INITIALIZING</strong><p id="pentest-phase-detail">Awaiting orchestration start.</p></article>
+                <article class="health-panel"><span>PHASE PROGRESS</span><strong id="pentest-phase">INITIALIZING</strong><p id="pentest-phase-detail">Awaiting orchestration start.</p><p id="pentest-elapsed" class="phase-elapsed"></p></article>
+              </div>
+
+              <div class="pentest-agents-container">
+                <p class="eyebrow">ACTIVE AGENTS</p>
+                <div id="pentest-active-agents" class="pentest-active-agents"><span class="agents-empty">No agents running yet — they spawn as phases execute.</span></div>
               </div>
 
               <div class="pentest-live-container">

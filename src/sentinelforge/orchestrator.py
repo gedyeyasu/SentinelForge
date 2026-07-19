@@ -101,6 +101,10 @@ _PHASE_NAMES: dict[Phase, str] = {
 }
 
 
+class RunDeadlineExceeded(RuntimeError):
+    """Raised when a run exceeds its max_run_seconds budget."""
+
+
 @dataclass
 class PhaseResult:
     phase: Phase
@@ -205,6 +209,8 @@ class AgentOrchestrator:
         )
 
         phases = self.plan_phases()
+        max_run = getattr(self._config, "max_run_seconds", 1800)
+        deadline = time.monotonic() + max_run
         self._store.append_event(
             run_id,
             phase="orchestrator",
@@ -213,12 +219,29 @@ class AgentOrchestrator:
                 "mode": self._mode.value,
                 "phases": [p.value for p in phases],
                 "config": self._config.to_dict(),
+                "max_run_seconds": max_run,
             },
         )
 
         for phase in phases:
             if state.cancelled:
                 break
+            if time.monotonic() > deadline:
+                self._store.append_event(
+                    run_id,
+                    phase="orchestrator",
+                    kind="run_deadline_exceeded",
+                    payload={
+                        "max_run_seconds": max_run,
+                        "completed_phases": [
+                            p.value for p in state.phases_completed
+                        ],
+                    },
+                )
+                raise RunDeadlineExceeded(
+                    f"Time budget exceeded ({max_run // 60}m) "
+                    f"after {len(state.phases_completed)} phases"
+                )
 
             state.current_phase = phase
             pentest_phase = PHASE_TO_PENTEST_PHASE.get(

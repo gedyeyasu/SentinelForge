@@ -8,6 +8,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
@@ -51,6 +52,174 @@ from sentinelforge.scope import ScopeValidationError, load_scope
 from sentinelforge.verification import OwnershipVerificationService, VerificationMethod
 
 logger = logging.getLogger(__name__)
+
+
+def _propose_scan_patch(repo_dir: Path, finding: dict[str, Any]) -> tuple[dict[str, str], str]:
+    """Propose a patch for a scan finding via NIM with vLLM fallback."""
+    from sentinelforge.config import resolve_nvidia_config
+    from sentinelforge.domain import Finding, Severity
+    from sentinelforge.inference.fallback import FallbackPatchProposer
+    from sentinelforge.inference.nvidia_nim import NIMPatchProposer
+    from sentinelforge.inference.vllm import VLLMPatchProposer
+
+    nvidia = resolve_nvidia_config()
+    if not nvidia.configured:
+        raise RuntimeError("NVIDIA API key not configured")
+
+    severity_map = {
+        "critical": Severity.CRITICAL,
+        "high": Severity.HIGH,
+        "medium": Severity.MEDIUM,
+        "low": Severity.LOW,
+    }
+    domain_finding = Finding(
+        finding_id=finding.get("finding_id") or "scan-finding",
+        rule_id=finding.get("rule_id") or finding.get("vulnerability", "scan"),
+        title=finding.get("title") or finding.get("vulnerability", "Security finding"),
+        severity=severity_map.get(str(finding.get("severity", "high")).lower(), Severity.HIGH),
+        path=finding.get("path") or finding.get("file_path", ""),
+        line=int(finding.get("line") or 0),
+        function=finding.get("function", ""),
+        endpoint=finding.get("endpoint", ""),
+        method=finding.get("method", "GET"),
+        description=finding.get("description", ""),
+        invariant=finding.get("invariant", "Resource access must be scoped to the owning tenant"),
+        evidence={},
+        remediation=finding.get("remediation", ""),
+        confidence=float(finding.get("confidence", 0.8)),
+    )
+
+    proposer = FallbackPatchProposer(
+        nim_proposer=NIMPatchProposer(
+            api_key=nvidia.api_key,
+            model=nvidia.model,
+            base_url=nvidia.base_url,
+        ),
+        vllm_proposer=VLLMPatchProposer(),
+    )
+    proposal = proposer.propose(domain_finding, str(repo_dir))
+    patches = {f.path: f.content for f in proposal.files if f.path and f.content}
+    if not patches:
+        raise RuntimeError("Proposer returned no file changes")
+    return patches, getattr(proposer, "last_provider", "nvidia_nim")
+
+
+def _deterministic_bola_patch(repo_dir: Path, finding: dict[str, Any]) -> dict[str, str]:
+    """Deterministic ownership-guard patch + regression test for BOLA findings."""
+    import tempfile
+
+    from sentinelforge.domain import Finding, Severity
+    from sentinelforge.remediation.fastapi_bola import FastAPIBOLAPatcher
+
+    evidence = finding.get("evidence") or {}
+    if not evidence.get("resource_variable"):
+        raise RuntimeError("Finding lacks evidence for deterministic patch")
+    severity_map = {
+        "critical": Severity.CRITICAL,
+        "high": Severity.HIGH,
+        "medium": Severity.MEDIUM,
+        "low": Severity.LOW,
+    }
+    domain_finding = Finding(
+        finding_id=finding.get("finding_id") or "scan-finding",
+        rule_id=finding.get("rule_id", "fastapi_bola"),
+        title=finding.get("title", "BOLA"),
+        severity=severity_map.get(str(finding.get("severity", "high")).lower(), Severity.HIGH),
+        path=finding.get("path") or finding.get("file_path", ""),
+        line=int(finding.get("line") or 0),
+        function=finding.get("function", ""),
+        endpoint=finding.get("endpoint", ""),
+        method=finding.get("method", "GET"),
+        description=finding.get("description", ""),
+        invariant=finding.get("invariant", ""),
+        evidence=evidence,
+        remediation=finding.get("remediation", ""),
+        confidence=float(finding.get("confidence", 0.8)),
+    )
+    with tempfile.TemporaryDirectory(prefix="sf_patch_") as tmp:
+        bundle = FastAPIBOLAPatcher().create_bundle(
+            domain_finding, repo_dir, Path(tmp)
+        )
+        patches: dict[str, str] = {}
+        for rel in bundle.changed_files:
+            patched_file = bundle.patched_root / rel
+            if patched_file.is_file():
+                patches[rel] = patched_file.read_text(encoding="utf-8")
+        if not patches:
+            raise RuntimeError("Deterministic patcher produced no changes")
+        return patches
+
+
+def _open_patch_pr(
+    *,
+    run_id: str,
+    repository: Path,
+    finding: Any,
+    proposal_files: list[dict[str, str]],
+    bus: EventBus,
+) -> dict[str, Any]:
+    """Branch -> apply proposal -> commit -> push -> draft PR via API."""
+    if not proposal_files:
+        return {"error": "no proposal files to apply"}
+    if not repository.is_dir():
+        return {"error": f"repository not a directory: {repository}"}
+    if not (repository / ".git").exists():
+        return {"error": "repository is not a git clone (no .git)"}
+
+    pr_gen = PRGenerator()
+    if not pr_gen.configured:
+        return {"error": "no GitHub token configured"}
+
+    patches = {
+        f["path"]: f["content"]
+        for f in proposal_files
+        if f.get("path") and f.get("content")
+    }
+    if not patches:
+        return {"error": "proposal files empty"}
+
+    branch = f"sentinelforge/fix-{finding.finding_id[-8:]}"
+    try:
+        try:
+            pr_gen.create_fix_branch(repository, finding.finding_id, branch)
+        except Exception:
+            pr_gen._git(repository, "checkout", branch)
+        applied = pr_gen.apply_patches(repository, patches)
+        pr_gen.commit_patches(repository, applied, finding.finding_id)
+        pr_gen.push_branch(repository, branch)
+    except Exception as error:
+        return {"error": f"git: {str(error)[:300]}"}
+
+    body = pr_gen.generate_pr_body(
+        finding.to_dict() if hasattr(finding, "to_dict") else {},
+        verification_passed=True,
+    )
+    pr = pr_gen.create_pull_request(
+        repository,
+        title=f"fix(security): {finding.title[:80]}",
+        body=body,
+        head=branch,
+        draft=True,
+    )
+    if pr is None:
+        return {"error": "GitHub API returned no PR"}
+
+    bus.publish(
+        LiveEvent(
+            run_id=run_id,
+            phase="patch_pr",
+            kind="patch_pr_created",
+            timestamp=time.time(),
+            payload={
+                "agent": "PatchPRAgent",
+                "finding_id": finding.finding_id,
+                "pr_url": pr.url,
+                "branch": branch,
+                "message": f"Draft PR created: {pr.url} (human review required)",
+            },
+        )
+    )
+    return {"pr_url": pr.url, "branch": branch, "number": pr.number}
 
 
 def create_app(
@@ -317,16 +486,23 @@ def create_app(
             raise HTTPException(status_code=404, detail="Pentest run not found")
 
         bus = EventBus.instance()
-        queue = bus.subscribe(run_id)
+        event_queue = bus.subscribe(run_id)
 
         async def event_generator():
+            import queue as _queue
+
+            last_keepalive = time.monotonic()
             try:
                 while True:
                     try:
-                        event = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    except TimeoutError:
-                        yield f": keepalive {time.time()}\n\n"
+                        event = event_queue.get_nowait()
+                    except _queue.Empty:
+                        await asyncio.sleep(0.25)
+                        if time.monotonic() - last_keepalive > 15:
+                            yield f": keepalive {time.time()}\n\n"
+                            last_keepalive = time.monotonic()
                         continue
+                    last_keepalive = time.monotonic()
                     if event is None:
                         break
                     data = json.dumps({
@@ -339,7 +515,7 @@ def create_app(
                     if event.kind == "run_completed":
                         break
             finally:
-                bus.unsubscribe(run_id, queue)
+                bus.unsubscribe(run_id, event_queue)
 
         return StreamingResponse(
             event_generator(),
@@ -437,8 +613,30 @@ def create_app(
             repository=Path(pentest.repository),
         )
         result = agent.process_finding(
-            finding, None, create_pr=create_pr
+            finding, None, create_pr=False
         )
+
+        # Real PR step when explicitly requested and patch verified
+        if create_pr and result.status in ("verified", "pr_created"):
+            try:
+                pr_result = _open_patch_pr(
+                    run_id=run_id,
+                    repository=Path(pentest.repository),
+                    finding=finding,
+                    proposal_files=result.verification.get(
+                        "proposal_files", []
+                    ),
+                    bus=bus,
+                )
+                if pr_result.get("pr_url"):
+                    result.status = "pr_created"
+                    result.pr_url = pr_result["pr_url"]
+                    result.branch = pr_result.get("branch", "")
+                else:
+                    result.error = pr_result.get("error", "PR step failed")
+            except Exception as error:
+                result.error = f"pr_step: {str(error)[:300]}"
+
         service.store.append_event(
             run_id,
             phase="patch_pr",
@@ -858,16 +1056,23 @@ def create_app(
     @app.get("/api/scan/{scan_id}/stream")
     async def stream_scan_events(scan_id: str):
         bus = EventBus.instance()
-        queue = bus.subscribe(scan_id)
+        event_queue = bus.subscribe(scan_id)
 
         async def event_generator():
+            import queue as _queue
+
+            last_keepalive = time.monotonic()
             try:
                 while True:
                     try:
-                        event = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    except TimeoutError:
-                        yield f": keepalive {time.time()}\n\n"
+                        event = event_queue.get_nowait()
+                    except _queue.Empty:
+                        await asyncio.sleep(0.25)
+                        if time.monotonic() - last_keepalive > 15:
+                            yield f": keepalive {time.time()}\n\n"
+                            last_keepalive = time.monotonic()
                         continue
+                    last_keepalive = time.monotonic()
                     if event is None:
                         break
                     data = json.dumps({
@@ -880,7 +1085,7 @@ def create_app(
                     if event.kind == "scan_completed":
                         break
             finally:
-                bus.unsubscribe(scan_id, queue)
+                bus.unsubscribe(scan_id, event_queue)
 
         return StreamingResponse(
             event_generator(),
@@ -956,36 +1161,73 @@ def create_app(
             raise HTTPException(status_code=400, detail=f"Not a directory: {repo_dir}")
 
         pr_gen = PRGenerator()
-        finding = request.finding
-        branch_name = request.branch_name or pr_gen.generate_branch_name(finding)
+        if not pr_gen.configured:
+            raise HTTPException(status_code=400, detail="No GitHub token available for PR creation")
 
+        finding_dict = request.finding
+        finding_id = finding_dict.get("finding_id") or f"scan-{uuid.uuid4().hex[:8]}"
+
+        # Step 1: build a real patch — NIM (vLLM fallback) or deterministic BOLA patcher
+        patches: dict[str, str] = {}
+        patch_provider = "none"
+        patch_error = ""
         try:
-            pr_gen.create_fix_branch(repo_dir, finding.get("finding_id", "fix"), branch_name)
+            patches, patch_provider = _propose_scan_patch(repo_dir, finding_dict)
         except Exception as error:
-            raise HTTPException(
-                status_code=500, detail=f"Branch creation failed: {error}"
-            ) from error
+            patch_error = str(error)[:300]
 
-        pr_body = pr_gen.generate_pr_body(finding)
-        title = f"fix(security): {finding.get('title', 'Security vulnerability')}"
+        if not patches:
+            # Deterministic fallback for BOLA findings
+            try:
+                patches = _deterministic_bola_patch(repo_dir, finding_dict)
+                patch_provider = "deterministic_bola"
+            except Exception as error:
+                return {
+                    "status": "failed",
+                    "step": "patch_generation",
+                    "error": f"NIM: {patch_error}; deterministic: {error}",
+                }
 
+        # Step 2: branch + apply + commit
+        branch_name = request.branch_name or pr_gen.generate_branch_name(
+            {**finding_dict, "finding_id": finding_id}
+        )
+        try:
+            try:
+                pr_gen.create_fix_branch(repo_dir, finding_id, branch_name)
+            except Exception:
+                pr_gen._git(repo_dir, "checkout", branch_name)
+            patched = pr_gen.apply_patches(repo_dir, patches)
+            pr_gen.commit_patches(repo_dir, patched, finding_id)
+        except Exception as error:
+            return {"status": "failed", "step": "commit", "error": str(error)[:300]}
+
+        pr_body = pr_gen.generate_pr_body(
+            {**finding_dict, "finding_id": finding_id},
+            verification_passed=False,
+        )
+        title = f"fix(security): {finding_dict.get('title', finding_id)[:80]}"
+
+        # Step 3: push + draft PR via GitHub API
         try:
             pr_gen.push_branch(repo_dir, branch_name)
-            pr = pr_gen.create_pull_request(
-                repo_dir,
-                title=title,
-                body=pr_body,
-                head=branch_name,
-            )
         except Exception as error:
-            raise HTTPException(status_code=500, detail=f"PR creation failed: {error}") from error
+            return {"status": "failed", "step": "push", "error": str(error)[:300]}
 
+        pr = pr_gen.create_pull_request(
+            repo_dir,
+            title=title,
+            body=pr_body,
+            head=branch_name,
+        )
         if pr is None:
-            return {"status": "failed", "error": "gh pr create failed"}
+            return {"status": "failed", "step": "pr_create", "error": "GitHub API PR creation returned no result"}
 
         return {
             "status": "created",
             "pr": pr.to_dict(),
+            "patch_provider": patch_provider,
+            "files_changed": list(patches.keys()),
         }
 
     # --- Ownership Proof ---

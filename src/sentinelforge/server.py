@@ -42,3 +42,7 @@ def main() -> None:
     host = os.environ.get("SENTINELFORGE_HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", os.environ.get("SENTINELFORGE_PORT", "8741")))
     uvicorn.run("sentinelforge.server:app", host=host, port=port, reload=False)
+
+
+if __name__ == "__main__":
+    main()

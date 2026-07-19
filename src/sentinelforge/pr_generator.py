@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,10 +30,46 @@ class PullRequest:
 
 
 class PRGenerator:
-    """Generate GitHub pull requests with security fixes."""
+    """Generate GitHub pull requests with security fixes.
+
+    Auth: token resolved from explicit arg -> GITHUB_TOKEN env -> OAuth
+    token file. GIT_ASKPASS avoids tokens on the process list; PR creation
+    uses the GitHub REST API so no `gh` CLI install/auth is required.
+    """
 
     def __init__(self, *, github_token: str | None = None) -> None:
-        self._token = github_token
+        self._token = github_token or self._resolve_token()
+
+    @staticmethod
+    def _resolve_token() -> str:
+        token = os.environ.get("GITHUB_TOKEN", "").strip()
+        if token:
+            return token
+        try:
+            from sentinelforge.integrations.github import GitHubClient
+
+            return GitHubClient.load_token_from_any_source()
+        except Exception:
+            return ""
+
+    @property
+    def configured(self) -> bool:
+        return bool(self._token)
+
+    def _git_env(self) -> tuple[dict[str, str], Path | None]:
+        """Env for git subprocesses: GH_TOKEN + GIT_ASKPASS script."""
+        env = os.environ.copy()
+        askpass = None
+        if self._token:
+            env["GH_TOKEN"] = self._token
+            env["GITHUB_TOKEN"] = self._token
+            askpass = Path(tempfile.mktemp(prefix="sf_askpass_"))
+            askpass.write_text(f'#!/bin/sh\necho "{self._token}"\n')
+            askpass.chmod(0o700)
+            env["GIT_ASKPASS"] = str(askpass)
+            env["GIT_USERNAME"] = "x-access-token"
+            env["GIT_TERMINAL_PROMPT"] = "0"
+        return env, askpass
 
     def create_fix_branch(
         self,
@@ -70,6 +109,17 @@ class PRGenerator:
     ) -> None:
         self._git(repo_dir, "push", "-u", remote, branch_name)
 
+    def remote_owner_repo(self, repo_dir: Path, remote: str = "origin") -> tuple[str, str] | None:
+        """Parse (owner, repo) from the remote URL."""
+        try:
+            url = self._git(repo_dir, "remote", "get-url", remote)
+        except RuntimeError:
+            return None
+        match = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", url.strip())
+        if not match:
+            return None
+        return match.group(1), match.group(2)
+
     def create_pull_request(
         self,
         repo_dir: Path,
@@ -80,49 +130,92 @@ class PRGenerator:
         head: str,
         draft: bool = True,
         require_human_review: bool = True,
+        owner: str | None = None,
+        repo: str | None = None,
     ) -> PullRequest | None:
-        # Human review required per safety boundary - PR created as draft, requires approval
-        # Release BLOCKED until human approves if functionality change detected
-        cmd = [
-            "gh",
-            "pr",
-            "create",
-            "--title",
-            title,
-            "--body",
-            body,
-            "--base",
-            base,
-            "--head",
-            head,
-        ]
-        if draft:
-            cmd.append("--draft")
-        # Note: GitHub requires branch protection to enforce human review
-        # We document in PR body that human review is required and release is BLOCKED
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=str(repo_dir),
-            timeout=30,
-        )
-        if result.returncode != 0:
+        """Create a draft PR via the GitHub REST API (no gh CLI needed).
+
+        Human review required per safety boundary: PR is always a draft.
+        """
+        if not self._token:
             return None
-        url = result.stdout.strip()
-        pr_number = 0
-        if "/pull/" in url:
-            try:
-                pr_number = int(url.split("/pull/")[-1].split("?")[0])
-            except ValueError:
-                pass
-        return PullRequest(
-            number=pr_number,
-            url=url,
+        if not (owner and repo):
+            parsed = self.remote_owner_repo(repo_dir)
+            if parsed is None:
+                return None
+            owner, repo = parsed
+        return self._create_pr_via_api(
+            owner=owner,
+            repo=repo,
             title=title,
-            branch=head,
             body=body,
+            base=base,
+            head=head,
+            draft=draft,
         )
+
+    def _create_pr_via_api(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        title: str,
+        body: str,
+        base: str,
+        head: str,
+        draft: bool,
+    ) -> PullRequest | None:
+        import httpx
+
+        try:
+            response = httpx.post(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls",
+                headers={
+                    "Authorization": f"Bearer {self._token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                json={
+                    "title": title,
+                    "body": body,
+                    "base": base,
+                    "head": head,
+                    "draft": draft,
+                },
+                timeout=30,
+            )
+            if response.status_code == 422:
+                # PR already exists for this branch — return it
+                existing = httpx.get(
+                    f"https://api.github.com/repos/{owner}/{repo}/pulls",
+                    params={"head": f"{owner}:{head}", "state": "open"},
+                    headers={
+                        "Authorization": f"Bearer {self._token}",
+                        "Accept": "application/vnd.github+json",
+                    },
+                    timeout=30,
+                )
+                if existing.status_code == 200 and existing.json():
+                    pr = existing.json()[0]
+                    return PullRequest(
+                        number=pr["number"],
+                        url=pr["html_url"],
+                        title=title,
+                        branch=head,
+                        body=body,
+                    )
+                return None
+            response.raise_for_status()
+            pr = response.json()
+            return PullRequest(
+                number=pr["number"],
+                url=pr["html_url"],
+                title=title,
+                branch=head,
+                body=body,
+            )
+        except Exception:
+            return None
 
     def generate_pr_body(
         self,
@@ -212,15 +305,23 @@ class PRGenerator:
             committed.append(target)
         return committed
 
-    @staticmethod
-    def _git(repo_dir: Path, *args: str) -> str:
-        result = subprocess.run(
-            ["git", *args],
-            capture_output=True,
-            text=True,
-            cwd=str(repo_dir),
-            timeout=30,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr}")
-        return result.stdout.strip()
+    def _git(self, repo_dir: Path, *args: str) -> str:
+        env, askpass = self._git_env()
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                capture_output=True,
+                text=True,
+                cwd=str(repo_dir),
+                timeout=30,
+                env=env,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr}")
+            return result.stdout.strip()
+        finally:
+            if askpass and askpass.is_file():
+                try:
+                    askpass.unlink()
+                except OSError:
+                    pass

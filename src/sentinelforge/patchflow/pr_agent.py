@@ -256,4 +256,8 @@ class PatchPRAgent:
             "mutations_tested": 3,
             "mutations_blocked": 3 if verified else 0,
             "method": "static_guard_analysis",
+            "proposal_files": [
+                {"path": f.path, "content": f.content}
+                for f in patched_files
+            ],
         }

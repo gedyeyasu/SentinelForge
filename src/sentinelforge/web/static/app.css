@@ -2251,11 +2251,77 @@ input:hover {
 
 .pentest-live-feed {
   max-height: 300px;
+  min-height: 180px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.5rem;
   background: var(--panel-inset);
+}
+
+/* Active agents panel */
+.pentest-agents-container {
+  margin-top: 12px;
+  min-width: 0;
+}
+.pentest-active-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-inset);
+  min-height: 48px;
+  align-items: center;
+}
+.agents-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+.agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-raised);
+  font-size: 12px;
+  max-width: 100%;
+}
+.agent-chip.running {
+  border-color: var(--info);
+}
+.agent-chip strong {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.agent-chip-detail {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 340px;
+}
+.agent-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--info);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: agent-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes agent-spin {
+  to { transform: rotate(360deg); }
+}
+.phase-elapsed {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
 }
 
 .pentest-live-feed .live-event {

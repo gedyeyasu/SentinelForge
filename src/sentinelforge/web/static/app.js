@@ -149,6 +149,9 @@ const state = {
   pollTimer: null,
   currentPentestRun: null,
   pentestPollTimer: null,
+  currentPentestStartedAt: null,
+  maxRunSeconds: 1800,
+  scanPollTimer: null,
   currentView: "scan",
   scanResults: null,
   ownershipChallenge: null,
@@ -646,6 +649,7 @@ function setupGithubSearch() {
 async function runLocalScan(e) {
   e?.preventDefault(); clearError(ui.scanError);
   if (scanEventSource) { scanEventSource.close(); scanEventSource = null; }
+  stopScanPolling();
   ui.scanButton.disabled = true; ui.scanButton.querySelector("span").textContent = "Scanning…";
   ui.scanEmpty.hidden = true;
   document.querySelector("#scan-progress").hidden = false;
@@ -655,36 +659,7 @@ async function runLocalScan(e) {
   try {
     const result = await api("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repository: ui.scanRepoInput.value.trim() }) });
     if (!result.scan_id) throw new Error("No scan_id returned");
-
-    // Connect SSE
-    scanEventSource = new EventSource(`/api/scan/${result.scan_id}/stream`);
-    scanEventSource.onmessage = async (e) => {
-      try {
-        const event = JSON.parse(e.data);
-        appendScanLogEntry(event);
-        updateScanAgentStatus(event);
-        if (event.kind === "scan_completed") {
-          scanEventSource.close();
-          scanEventSource = null;
-          // Fetch the full result
-          try {
-            const fullResult = await api(`/api/scan/${result.scan_id}`);
-            await new Promise(r => setTimeout(r, 400));
-            document.querySelector("#scan-progress").hidden = true;
-            renderScanResults(fullResult);
-          } catch {
-            document.querySelector("#scan-progress").hidden = true;
-            showError(ui.scanError, "Failed to fetch scan results");
-          }
-          ui.scanButton.disabled = false;
-          ui.scanButton.querySelector("span").textContent = "Start scan";
-        }
-      } catch {}
-    };
-    scanEventSource.onerror = () => {
-      scanEventSource.close();
-      scanEventSource = null;
-    };
+    attachScanStream(result.scan_id);
   } catch (err) {
     document.querySelector("#scan-progress").hidden = true;
     ui.scanEmpty.hidden = false;
@@ -694,9 +669,85 @@ async function runLocalScan(e) {
   }
 }
 
+function attachScanStream(scanId) {
+  saveActiveScan(scanId);
+  scanEventSource = new EventSource(`/api/scan/${scanId}/stream`);
+  scanEventSource.onmessage = async (e) => {
+    try {
+      const event = JSON.parse(e.data);
+      appendScanLogEntry(event);
+      updateScanAgentStatus(event);
+      if (event.kind === "scan_completed") {
+        if (scanEventSource) { scanEventSource.close(); scanEventSource = null; }
+        await finishScan(scanId);
+      }
+    } catch {}
+  };
+  scanEventSource.onerror = () => {
+    scanEventSource.close();
+    scanEventSource = null;
+    // Polling fallback continues below
+  };
+  startScanPolling(scanId);
+}
+
+function stopScanPolling() {
+  if (state.scanPollTimer) {
+    clearInterval(state.scanPollTimer);
+    state.scanPollTimer = null;
+  }
+}
+
+function startScanPolling(scanId) {
+  stopScanPolling();
+  const startedAt = Date.now();
+  state.scanPollTimer = setInterval(async () => {
+    if (Date.now() - startedAt > 15 * 60 * 1000) {
+      stopScanPolling();
+      clearActiveScan();
+      document.querySelector("#scan-progress").hidden = true;
+      showError(ui.scanError, "Scan timed out (15m). Check run history or retry.");
+      ui.scanButton.disabled = false;
+      ui.scanButton.querySelector("span").textContent = "Start scan";
+      ui.scanGithubButton.disabled = false;
+      ui.scanGithubButton.querySelector("span").textContent = "Scan GitHub repo";
+      return;
+    }
+    try {
+      const fullResult = await api(`/api/scan/${scanId}`);
+      if (fullResult && fullResult.summary) {
+        stopScanPolling();
+        if (scanEventSource) { scanEventSource.close(); scanEventSource = null; }
+        await finishScan(scanId, fullResult);
+      }
+    } catch {
+      // 404 while running — keep polling
+    }
+  }, 2500);
+}
+
+async function finishScan(scanId, prefetched) {
+  stopScanPolling();
+  clearActiveScan();
+  try {
+    const fullResult = prefetched || await api(`/api/scan/${scanId}`);
+    await new Promise(r => setTimeout(r, 300));
+    document.querySelector("#scan-progress").hidden = true;
+    renderScanResults(fullResult);
+  } catch {
+    document.querySelector("#scan-progress").hidden = true;
+    showError(ui.scanError, "Failed to fetch scan results");
+  }
+  ui.scanButton.disabled = false;
+  ui.scanButton.querySelector("span").textContent = "Start scan";
+  ui.scanGithubButton.disabled = false;
+  ui.scanGithubButton.querySelector("span").textContent = "Scan GitHub repo";
+}
+
 async function runGithubScan(e) {
   e?.preventDefault(); clearError(ui.scanError);
   if (scanEventSource) { scanEventSource.close(); scanEventSource = null; }
+  stopScanPolling();
   ui.scanGithubButton.disabled = true; ui.scanGithubButton.querySelector("span").textContent = "Scanning…";
   ui.scanEmpty.hidden = true;
   document.querySelector("#scan-progress").hidden = false;
@@ -706,33 +757,7 @@ async function runGithubScan(e) {
   try {
     const result = await api("/api/scan/github", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ owner: ui.scanGithubOwner.value.trim(), repo: ui.scanGithubRepo.value.trim() }) });
     if (!result.scan_id) throw new Error("No scan_id returned");
-    scanEventSource = new EventSource(`/api/scan/${result.scan_id}/stream`);
-    scanEventSource.onmessage = async (e) => {
-      try {
-        const event = JSON.parse(e.data);
-        appendScanLogEntry(event);
-        updateScanAgentStatus(event);
-        if (event.kind === "scan_completed") {
-          scanEventSource.close();
-          scanEventSource = null;
-          try {
-            const fullResult = await api(`/api/scan/${result.scan_id}`);
-            await new Promise(r => setTimeout(r, 400));
-            document.querySelector("#scan-progress").hidden = true;
-            renderScanResults(fullResult);
-          } catch {
-            document.querySelector("#scan-progress").hidden = true;
-            showError(ui.scanError, "Failed to fetch scan results");
-          }
-          ui.scanGithubButton.disabled = false;
-          ui.scanGithubButton.querySelector("span").textContent = "Scan GitHub repo";
-        }
-      } catch {}
-    };
-    scanEventSource.onerror = () => {
-      scanEventSource.close();
-      scanEventSource = null;
-    };
+    attachScanStream(result.scan_id);
   } catch (err) {
     document.querySelector("#scan-progress").hidden = true;
     ui.scanEmpty.hidden = false;
@@ -854,20 +879,36 @@ async function createRun(e) {
 }
 
 // ===== PENTEST =====
+// Exact phase values emitted by the backend orchestrator (Phase enum).
 const PHASE_ICONS = {
   init: "⚡", ownership_verification: "🔑", environment_check: "🌍",
-  scoping: "📋", mapping: "🗺️", dependency_scan: "📦",
-  pattern_scan: "🔍", attacking: "⚔️", custom_exploit: "💻",
-  cve_ingestion: "📰", threat_learning: "🧠", zero_day_hunting: "🔮",
-  nim_analysis: "🤖", attestation: "📝", safety: "🛡️", openshell_audit: "🔒",
-  complete: "✅",
+  scoping: "📋", cve_ingestion: "📰", mapping: "🗺️",
+  dependency_scan: "📦", pattern_scan: "🔍", threat_learning: "🧠",
+  auth_attack: "⚔️", injection_attack: "💉", zero_day_hunting: "🔮",
+  custom_exploit: "💻", hiddenlayer_scan: "🛡️", openshell_audit: "🔒",
+  nim_analysis: "🤖", attestation: "📝", complete: "✅",
+  // handler-emitted aliases
+  attacking: "⚔️", safety: "🛡️", openshell: "🔒", patch_pr: "🔧",
+};
+
+const PHASE_NAMES = {
+  init: "Initialization", ownership_verification: "Ownership Verification",
+  environment_check: "Environment Check", scoping: "Scoping",
+  cve_ingestion: "CVE Intelligence", mapping: "Surface Mapping",
+  dependency_scan: "Dependency Scan", pattern_scan: "Pattern Scan",
+  threat_learning: "Threat Learning", auth_attack: "Auth Attack (BOLA)",
+  injection_attack: "Injection Attack", zero_day_hunting: "Zero-Day Hunting",
+  custom_exploit: "Custom Exploit Writer", hiddenlayer_scan: "HiddenLayer Safety",
+  openshell_audit: "OpenShell Policy Audit", nim_analysis: "NIM Threat Analysis",
+  attestation: "Signed Attestation", complete: "Complete",
 };
 
 const PHASE_ORDER = [
   "init", "ownership_verification", "environment_check", "scoping",
-  "mapping", "dependency_scan", "cve_ingestion", "threat_learning",
-  "zero_day_hunting", "pattern_scan", "attacking", "custom_exploit",
-  "nim_analysis", "openshell_audit", "attestation", "complete",
+  "cve_ingestion", "mapping", "dependency_scan", "pattern_scan",
+  "threat_learning", "auth_attack", "injection_attack",
+  "zero_day_hunting", "custom_exploit", "hiddenlayer_scan",
+  "openshell_audit", "nim_analysis", "attestation", "complete",
 ];
 
 function renderLiveProgressBar(phases, currentPhase) {
@@ -878,22 +919,116 @@ function renderLiveProgressBar(phases, currentPhase) {
   PHASE_ORDER.forEach((phase, i) => {
     const step = document.createElement("div");
     step.className = "progress-step";
-    if (i < currentIdx) step.classList.add("done");
+    if (currentIdx >= 0 && i < currentIdx) step.classList.add("done");
     else if (i === currentIdx) step.classList.add("active");
+    step.title = PHASE_NAMES[phase] || phase;
     const icon = document.createElement("span");
     icon.className = "progress-icon";
     icon.textContent = PHASE_ICONS[phase] || "•";
     const label = document.createElement("span");
     label.className = "progress-label";
-    label.textContent = phase.replace(/_/g, " ");
+    label.textContent = PHASE_NAMES[phase] || phase.replace(/_/g, " ");
     step.append(icon, label);
     bar.append(step);
     if (i < PHASE_ORDER.length - 1) {
       const conn = document.createElement("div");
-      conn.className = i < currentIdx ? "progress-connector done" : "progress-connector";
+      conn.className = currentIdx >= 0 && i < currentIdx ? "progress-connector done" : "progress-connector";
       bar.append(conn);
     }
   });
+}
+
+// --- Active agents panel: derived from real backend events only ---
+const activeAgents = new Map(); // key -> {agent, detail, started}
+
+function agentEventKey(event) {
+  const p = event.payload || {};
+  return p.task_id || p.agent || event.kind;
+}
+
+function updateActiveAgents(event) {
+  const panel = document.querySelector("#pentest-active-agents");
+  if (!panel) return;
+  const p = event.payload || {};
+  const key = agentEventKey(event);
+  const isStart = ["agent_started", "swarm_agent_spawned", "swarm_launched", "phase_started", "identities_provisioning"].includes(event.kind);
+  const isEnd = ["agent_completed", "swarm_agent_completed", "swarm_agent_failed", "swarm_finished", "agent_error", "identity_provisioned", "identities_provision_failed"].includes(event.kind);
+
+  if (isStart) {
+    activeAgents.set(key, {
+      agent: p.agent || event.phase,
+      detail: (p.message || event.kind).slice(0, 80),
+      started: event.timestamp,
+    });
+  } else if (isEnd) {
+    activeAgents.delete(key);
+    // swarm_launched/finished share the coordinator key
+    if (event.kind === "swarm_finished") activeAgents.delete("SwarmCoordinator");
+  }
+  renderActiveAgents();
+}
+
+function renderActiveAgents() {
+  const panel = document.querySelector("#pentest-active-agents");
+  if (!panel) return;
+  panel.replaceChildren();
+  if (activeAgents.size === 0) {
+    const empty = document.createElement("span");
+    empty.className = "agents-empty";
+    empty.textContent = "No agents currently running — completed agents appear in the feed below.";
+    panel.append(empty);
+    return;
+  }
+  for (const [, info] of activeAgents) {
+    const chip = document.createElement("div");
+    chip.className = "agent-chip running";
+    const spinner = document.createElement("span");
+    spinner.className = "agent-spinner";
+    const name = document.createElement("strong");
+    name.textContent = info.agent;
+    const detail = document.createElement("span");
+    detail.className = "agent-chip-detail";
+    detail.textContent = info.detail;
+    chip.append(spinner, name, detail);
+    panel.append(chip);
+  }
+}
+
+function updatePhasePanel(event) {
+  const phaseEl = document.querySelector("#pentest-phase");
+  const detailEl = document.querySelector("#pentest-phase-detail");
+  if (!phaseEl || !detailEl) return;
+  const p = event.payload || {};
+  if (event.kind === "phase_started" && p.phase) {
+    const name = PHASE_NAMES[p.phase] || p.phase.replace(/_/g, " ");
+    text(phaseEl, name.toUpperCase());
+    text(detailEl, `Phase started — agents working.`);
+  } else if (event.kind === "phase_completed" && p.phase) {
+    const name = PHASE_NAMES[p.phase] || p.phase.replace(/_/g, " ");
+    text(detailEl, `${name} complete.`);
+  } else if (["agent_started", "agent_completed", "swarm_launched", "swarm_finished", "novel_finding", "openshell_denied", "verdict"].includes(event.kind)) {
+    if (p.message) text(detailEl, p.message.slice(0, 140));
+  }
+}
+
+let elapsedTimer = null;
+function startElapsedClock(startedAtIso, maxSeconds) {
+  const el = document.querySelector("#pentest-elapsed");
+  if (!el) return;
+  if (elapsedTimer) clearInterval(elapsedTimer);
+  const startMs = startedAtIso ? new Date(startedAtIso).getTime() : Date.now();
+  const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  const tick = () => {
+    const elapsed = Math.max(0, (Date.now() - startMs) / 1000);
+    el.textContent = maxSeconds
+      ? `${fmt(elapsed)} elapsed / ${fmt(maxSeconds)} max`
+      : `${fmt(elapsed)} elapsed`;
+  };
+  tick();
+  elapsedTimer = setInterval(tick, 1000);
+}
+function stopElapsedClock() {
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
 }
 
 function appendLiveEvent(event) {
@@ -1001,24 +1136,37 @@ function renderPentestRun(data) {
           const prBtn = document.createElement("button");
           prBtn.className = "secondary-button";
           prBtn.textContent = "Create Patch PR";
-          prBtn.title = "Patch agent will create fix branch, generate patch via Nemotron, verify with mutated exploits, create PR requiring human review";
+          prBtn.title = "Patch agent proposes a fix via NIM (vLLM fallback), verifies the guard, then opens a draft PR requiring human review";
           prBtn.addEventListener("click", async () => {
             prBtn.disabled = true;
-            prBtn.textContent = "Creating PR...";
+            prBtn.textContent = "Proposing patch…";
+            const resultEl = document.createElement("div");
+            resultEl.style.fontSize = "12px";
+            resultEl.style.marginTop = "4px";
             try {
-              // Call API to generate patch and PR
-              const prResult = await api("/api/scan", {
+              const resp = await api(`/api/pentest/${encodeURIComponent(run.run_id)}/patch-pr?finding_id=${encodeURIComponent(receipt.finding_id)}&create_pr=true`, {
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({repository: run.repository})
               });
-              alert(`Patch PR flow: Finding ${receipt.finding_id} -> Patch agent generates fix via Nemotron -> Adversarial verifier tests 3 mutations -> Creates PR with human review required. Release BLOCKED until human approval. See console for details. Check .sentinelforge/attestations/`);
-              console.log("Patch PR flow for receipt:", receipt, prResult);
-            } catch(e) {
-              alert(`Create Patch PR: This will invoke patch_engineer agent to generate fix for ${receipt.finding_id}, create branch, generate PR requiring human review. Release BLOCKED. Error: ${e.message}`);
+              const r = resp.result || {};
+              if (r.status === "pr_created" && r.pr_url) {
+                prBtn.textContent = "PR created ✓";
+                resultEl.innerHTML = `Draft PR (human review required): <a href="${r.pr_url}" target="_blank" style="color:var(--info)">${r.pr_url}</a>`;
+              } else if (r.status === "verified") {
+                prBtn.textContent = "Patch verified";
+                resultEl.textContent = `Patch proposed + verified via ${r.patch_provider || "proposer"}. ${r.error ? "PR step: " + r.error : "Enable create_pr to open a draft PR."}`;
+                prBtn.disabled = false;
+                prBtn.textContent = "Create Patch PR";
+              } else {
+                prBtn.textContent = "Create Patch PR";
+                prBtn.disabled = false;
+                resultEl.textContent = `Patch flow: ${r.status || "failed"}${r.error ? " — " + r.error : ""}`;
+              }
+            } catch (e2) {
+              prBtn.disabled = false;
+              prBtn.textContent = "Create Patch PR";
+              resultEl.textContent = `Patch PR failed: ${e2.message}`;
             }
-            prBtn.disabled = false;
-            prBtn.textContent = "Create Patch PR";
+            info.append(resultEl);
           });
           row.append(sev, info, prBtn);
           ui.pentestEvidenceList.append(row);
@@ -1104,20 +1252,32 @@ let pentestEventSource = null;
 
 function startPentestStream(runId) {
   if (pentestEventSource) pentestEventSource.close();
-  const feed = document.querySelector("#pentest-live-feed");
-  if (feed) feed.replaceChildren();
-  renderLiveProgressBar([], "init");
+  activeAgents.clear();
+  renderActiveAgents();
 
   pentestEventSource = new EventSource(`/api/pentest/${runId}/stream`);
   pentestEventSource.onmessage = (e) => {
     try {
       const event = JSON.parse(e.data);
       appendLiveEvent(event);
-      if (event.payload?.phase) renderLiveProgressBar([], event.payload.phase);
-      // Update verdict panel on completion
+      updateActiveAgents(event);
+      updatePhasePanel(event);
+      if (event.kind === "phase_started" && event.payload?.phase) {
+        renderLiveProgressBar([], event.payload.phase);
+      }
+      if (event.kind === "orchestration_started" && event.payload?.max_run_seconds) {
+        state.maxRunSeconds = event.payload.max_run_seconds;
+        startElapsedClock(state.currentPentestStartedAt, state.maxRunSeconds);
+      }
+      if (event.kind === "verdict" && event.payload?.verdict) {
+        setVerdict(ui.pentestVerdictPanel, ui.pentestVerdict, ui.pentestVerdictCaption, event.payload.verdict.toLowerCase(), "candidate");
+      }
       if (event.kind === "run_completed") {
         pentestEventSource.close();
         pentestEventSource = null;
+        stopPentestPolling();
+        stopElapsedClock();
+        clearActivePentest();
         refreshPentestRun(runId);
       }
     } catch {}
@@ -1125,7 +1285,56 @@ function startPentestStream(runId) {
   pentestEventSource.onerror = () => {
     pentestEventSource.close();
     pentestEventSource = null;
+    // Polling fallback keeps the UI moving even if SSE drops
   };
+}
+
+// --- Active run polling fallback (works even if SSE is unreachable) ---
+function startPentestPolling(runId) {
+  stopPentestPolling();
+  state.pentestPollTimer = setInterval(async () => {
+    try {
+      const data = await api(`/api/pentest/${encodeURIComponent(runId)}`);
+      renderPentestRun(data);
+      const run = data.pentest_run;
+      if (run && !["queued", "running"].includes(run.status)) {
+        stopPentestPolling();
+        stopElapsedClock();
+        clearActivePentest();
+        if (pentestEventSource) { pentestEventSource.close(); pentestEventSource = null; }
+        ui.pentestButton.disabled = false;
+        ui.pentestButton.querySelector("span").textContent = "Start pentest";
+        loadPentestRuns();
+      }
+    } catch {}
+  }, 3000);
+}
+
+function stopPentestPolling() {
+  if (state.pentestPollTimer) {
+    clearInterval(state.pentestPollTimer);
+    state.pentestPollTimer = null;
+  }
+}
+
+// --- Refresh persistence ---
+function saveActivePentest(runId) {
+  try {
+    localStorage.setItem("sf_active_pentest", runId);
+    localStorage.setItem("sf_active_pentest_started", new Date().toISOString());
+  } catch {}
+}
+function clearActivePentest() {
+  try {
+    localStorage.removeItem("sf_active_pentest");
+    localStorage.removeItem("sf_active_pentest_started");
+  } catch {}
+}
+function saveActiveScan(scanId) {
+  try { localStorage.setItem("sf_active_scan", scanId); } catch {}
+}
+function clearActiveScan() {
+  try { localStorage.removeItem("sf_active_scan"); } catch {}
 }
 
 async function createPentest(e) {
@@ -1158,7 +1367,7 @@ async function createPentest(e) {
       ui.pentestEmpty.hidden = true; ui.pentestActive.hidden = false;
       text(ui.pentestRunId, result.run_id.toUpperCase());
       text(ui.pentestLifecycle, "RUNNING");
-      startPentestStream(result.run_id);
+      watchPentestRun(result.run_id);
       loadPentestRuns();
     }
   } catch (err) {
@@ -1168,17 +1377,30 @@ async function createPentest(e) {
   }
 }
 
+function watchPentestRun(runId) {
+  // Attach live stream + polling fallback + persistence
+  state.currentPentestStartedAt = new Date().toISOString();
+  state.maxRunSeconds = 1800;
+  saveActivePentest(runId);
+  const feed = document.querySelector("#pentest-live-feed");
+  if (feed) feed.replaceChildren();
+  renderLiveProgressBar([], "init");
+  startElapsedClock(state.currentPentestStartedAt, state.maxRunSeconds);
+  startPentestStream(runId);
+  startPentestPolling(runId);
+}
+
 async function refreshPentestRun(runId) {
   try {
     const data = await api(`/api/pentest/${encodeURIComponent(runId)}`);
     renderPentestRun(data);
     const run = data.pentest_run;
-    if (run && ["queued", "running"].includes(run.status)) {
-      // Still running — SSE will handle live updates, just poll for final state
-      state.pentestPollTimer = setTimeout(() => refreshPentestRun(runId), 2000);
-    } else {
+    if (run && !["queued", "running"].includes(run.status)) {
       ui.pentestButton.disabled = false;
       ui.pentestButton.querySelector("span").textContent = "Start pentest";
+      stopPentestPolling();
+      stopElapsedClock();
+      clearActivePentest();
       loadPentestRuns();
     }
   } catch (err) { ui.pentestButton.disabled = false; showError(ui.pentestError, err.message); }
@@ -1325,7 +1547,13 @@ function initialize() {
       ui.pentestStagingUrl.required = isUrl;
       ui.pentestRepository.required = !isUrl;
       if (isUrl) {
-        ui.pentestStagingUrl.placeholder = "https://staging.example.com";
+        ui.pentestStagingUrl.placeholder = "https://api.cini.love";
+        // Default to the live-target scope (identity provisioning enabled)
+        if (ui.pentestScope && ui.pentestScope.value.trim() === "config/scope.yaml") {
+          ui.pentestScope.value = "config/scope-cini.yaml";
+        }
+      } else if (ui.pentestScope && ui.pentestScope.value.trim() === "config/scope-cini.yaml") {
+        ui.pentestScope.value = "config/scope.yaml";
       }
     });
   }
@@ -1353,6 +1581,46 @@ function initialize() {
   checkIntegrations(); loadRedHatIntelligence(); loadPentestRuns(); loadSchedules();
   checkGithubOAuthStatus();
   switchView("scan");
+  resumeActiveJobs();
+}
+
+// Resume in-flight scan/pentest after a page refresh
+async function resumeActiveJobs() {
+  let scanId = null;
+  let pentestId = null;
+  try {
+    scanId = localStorage.getItem("sf_active_scan");
+    pentestId = localStorage.getItem("sf_active_pentest");
+  } catch {}
+
+  if (scanId) {
+    ui.scanEmpty.hidden = true;
+    document.querySelector("#scan-progress").hidden = false;
+    attachScanStream(scanId);
+  }
+  if (pentestId) {
+    try {
+      const data = await api(`/api/pentest/${encodeURIComponent(pentestId)}`);
+      const run = data.pentest_run;
+      if (run && ["queued", "running"].includes(run.status)) {
+        ui.pentestEmpty.hidden = true; ui.pentestActive.hidden = false;
+        renderPentestRun(data);
+        state.currentPentestStartedAt = run.created_at;
+        saveActivePentest(pentestId);
+        startPentestStream(pentestId);
+        startPentestPolling(pentestId);
+        startElapsedClock(run.created_at, state.maxRunSeconds);
+      } else if (run) {
+        // Finished while away — render final state and clear
+        renderPentestRun(data);
+        clearActivePentest();
+      } else {
+        clearActivePentest();
+      }
+    } catch {
+      clearActivePentest();
+    }
+  }
 }
 
 initialize();
