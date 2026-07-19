@@ -112,7 +112,55 @@ class NovelAttackSynthesizer:
             hypotheses.extend(self._compose_for_route(route))
         hypotheses = self._dedupe_and_score(hypotheses)
         hypotheses.sort(key=lambda h: (-h.novelty_score, h.severity))
-        return hypotheses[:max_hypotheses]
+        return self._guaranteed_attacks(routes, hypotheses[:max_hypotheses])
+
+    def _guaranteed_attacks(
+        self,
+        routes: list[DiscoveredRoute],
+        hypotheses: list[AttackHypothesis],
+    ) -> list[AttackHypothesis]:
+        """Ensure demo-critical attacks always run regardless of dedup/cap."""
+        import secrets as _secrets
+
+        for route in routes:
+            if "register" not in route.path or route.method != "POST":
+                continue
+            email = f"sf-race-{_secrets.token_hex(4)}@sentinelforge-test.invalid"
+            body = f'{{"email":"{email}","password":"P@ssw0rd!Aa1"}}'
+            url = self._base_url + route.path
+            hypotheses.append(
+                AttackHypothesis(
+                    hypothesis_id="comp_" + uuid.uuid4().hex[:8],
+                    title=f"Race condition: double-register on {route.path}",
+                    rationale=(
+                        "Two concurrent registration requests with the same "
+                        "email race past the uniqueness check (check-then-act "
+                        "without a transaction). If one wins and the other "
+                        "raises IntegrityError 500, the server has a near-zero-day "
+                        "race condition vulnerability."
+                    ),
+                    attack_class="race_condition",
+                    severity="critical",
+                    target_path=route.path,
+                    steps=(
+                        AttackStep(
+                            method="POST", url=url,
+                            headers={"Content-Type": "application/json"},
+                            body=body,
+                            success_signal="integrityerror_500",
+                        ),
+                        AttackStep(
+                            method="POST", url=url,
+                            headers={"Content-Type": "application/json"},
+                            body=body,
+                            success_signal="integrityerror_500",
+                        ),
+                    ),
+                    source="composition_engine",
+                    novelty_score=0.95,
+                )
+            )
+        return hypotheses
 
     # ------------------------------------------------------------------
     # LLM-driven hypothesis generation
