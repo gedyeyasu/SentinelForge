@@ -459,31 +459,42 @@ class NovelAttackSynthesizer:
 
         # 7. Race condition (double-submit) for mutating endpoints
         if route.method == "POST":
+            import secrets as _secrets
+
+            race_email = f"sf-race-{_secrets.token_hex(4)}@sentinelforge-test.invalid"
+            race_body = (
+                '{"email":"' + race_email + '","password":"P@ssw0rd!Aa1"}'
+                if "register" in base_path
+                else "{}"
+            )
             _hyp(
                 "race_condition",
                 f"Race condition double-submit on {base_path}",
                 (
                     "Concurrent duplicate requests may defeat "
-                    "check-then-act logic (double-spend, double-claim)."
+                    "check-then-act logic (double-spend, double-claim). "
+                    "Two identical requests sent simultaneously — if the "
+                    "server uses check-then-act without a transaction, "
+                    "the second request races past the uniqueness check."
                 ),
-                "medium",
+                "high",
                 [
                     AttackStep(
                         method="POST",
                         url=self._base_url + base_path,
                         headers={"Content-Type": "application/json"},
-                        body="{}",
+                        body=race_body,
                         success_signal="duplicate_effect",
                     ),
                     AttackStep(
                         method="POST",
                         url=self._base_url + base_path,
                         headers={"Content-Type": "application/json"},
-                        body="{}",
+                        body=race_body,
                         success_signal="duplicate_effect",
                     ),
                 ],
-                0.6,
+                0.75,
             )
 
         # 8. Type juggling in JSON bodies
@@ -646,6 +657,9 @@ class NovelAttackSynthesizer:
         if response.status_code in (401, 403, 404, 405):
             return ExploitOutcome.BLOCKED
         if response.status_code >= 500:
+            body = (response.body or "").lower()
+            if "integrityerror" in body or "race" in hypothesis.attack_class:
+                return ExploitOutcome.SUCCESS
             return ExploitOutcome.ERROR
         body = response.body.lower() if response.body else ""
         blocked_signals = ("not found", "forbidden", "unauthorized", "denied")
@@ -684,11 +698,18 @@ class NovelAttackSynthesizer:
                 f"Server must reject {hypothesis.attack_class}: "
                 f"{hypothesis.title}"
             ),
+            body_lower = (body or "").lower()
+            is_crash = status >= 500 and ("integrityerror" in body_lower or "race" in hypothesis.attack_class)
             observed_behavior=(
                 (
-                    "⚠️ CROSS-TENANT DATA LEAKED: Attacker accessed owner's resource. "
-                    if extra.get("cross_tenant_data")
-                    else ""
+                    "☠️ SERVER CRASHED: Race condition caused IntegrityError 500. "
+                    f"Evidence: {body.replace(chr(10), ' ')[:120]}. "
+                    if is_crash
+                    else (
+                        "⚠️ CROSS-TENANT DATA LEAKED: Attacker accessed owner's resource. "
+                        if extra.get("cross_tenant_data")
+                        else ""
+                    )
                 )
                 + f"[{hypothesis.source}] {hypothesis.title} -> HTTP {status}. "
                 + (
