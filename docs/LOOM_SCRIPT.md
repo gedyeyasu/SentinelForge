@@ -292,7 +292,7 @@ inside disposable deployed environments before gating production releases.
 - [ ] Replace stale README claims that HiddenLayer, vLLM, NemoClaw, OpenShell,
   and Supabase are active, and replace the old `233 tests` count with the
   current verified `267 tests`.
-- [ ] Push the three local commits currently ahead of `origin/main`, plus this
-  script update, before copying the repository link into Airtable.
+- [x] Latest application commits and this script are pushed to public
+  `origin/main` at commit `2aa801b`.
 - [ ] Paste the final Loom link into the Airtable form.
 - [ ] Paste the 240-word submission write-up from this document.
