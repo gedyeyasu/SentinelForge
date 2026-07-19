@@ -29,17 +29,19 @@ fly secrets set \
   GITHUB_CLIENT_SECRET=<from GitHub OAuth App> \
   GITHUB_OAUTH_CALLBACK_URL=https://sentinelforge.fly.dev/api/github/oauth/callback \
   PENTEST_TARGET_HOST='api\.cini\.love' \
-  OPENSHELL_POLICY_PATH=config/openshell-policy.yaml \
-  CINI_OWNER_JWT=<JWT of cini test user A> \
-  CINI_ATTACKER_JWT=<JWT of cini test user B>
+  OPENSHELL_POLICY_PATH=config/openshell-policy.yaml
 ```
 
 Notes:
 - `PENTEST_TARGET_HOST` authorizes the OpenShell policy to allow traffic to
   `api.cini.love` while everything else stays deny-by-default. Keep the
   escaped dots (`api\.cini\.love`).
-- `CINI_*_JWT` feed `config/scope-cini.yaml` via env substitution — no
-  secrets committed to git. Get JWTs by logging into cini as each test user.
+- **Test identities are dynamic**: with `provision_identities: true` in
+  `config/scope-cini.yaml` (the default), the agent registers its own
+  run-scoped test accounts (`sf-<run>-<role>@sentinelforge-test.invalid`)
+  on the cini public registration endpoint at run start and uses those
+  JWTs — nothing to configure. Static `CINI_OWNER_JWT`/`CINI_ATTACKER_JWT`
+  env vars are only a fallback if provisioning is disabled.
 
 ## 3. Deploy
 

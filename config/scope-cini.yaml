@@ -53,20 +53,21 @@ allow_persistence: false
 allow_data_exfiltration: false
 
 # Synthetic test identities for cross-tenant BOLA
-# IMPORTANT: Create 2 test user accounts in Cini (tenant-a and tenant-b) and put their auth headers here
-# For Django, likely Authorization: Bearer <token> or x-user-id
-# Example for Cini:
+# DYNAMIC MODE (default): the agent provisions its own run-scoped test accounts
+# via the public registration endpoint at run start - no static JWTs to manage.
+# Set provision_identities: false to use the static env-var JWTs below instead.
+provision_identities: true
+
 test_identities:
   - name: "owner"
     tenant_id: "tenant-a"
     headers:
-      # Set via env: CINI_OWNER_JWT (get token by logging in as test user 1)
+      # Static fallback only - used if provisioning fails or is disabled
       Authorization: "Bearer ${CINI_OWNER_JWT:-REPLACE_WITH_TEST_USER_1_JWT}"
       x-user-id: "${CINI_OWNER_ID:-test-user-1-id}"
   - name: "attacker"
     tenant_id: "tenant-b"
     headers:
-      # Set via env: CINI_ATTACKER_JWT (get token by logging in as test user 2)
       Authorization: "Bearer ${CINI_ATTACKER_JWT:-REPLACE_WITH_TEST_USER_2_JWT}"
       x-user-id: "${CINI_ATTACKER_ID:-test-user-2-id}"
 

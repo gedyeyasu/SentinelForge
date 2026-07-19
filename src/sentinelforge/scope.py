@@ -44,6 +44,7 @@ class ScopeConfig:
     allow_production: bool = False
     test_identities: tuple[TestIdentity, ...] = ()
     kill_switch_file: str = "/run/sentinelforge/STOP"
+    provision_identities: bool = False
 
     def identity_names(self) -> tuple[str, ...]:
         return tuple(identity.name for identity in self.test_identities)
@@ -80,6 +81,28 @@ class ScopeConfig:
             allow_production=self.allow_production,
             test_identities=self.test_identities,
             kill_switch_file=self.kill_switch_file,
+            provision_identities=self.provision_identities,
+        )
+
+    def with_identities(
+        self, identities: tuple[TestIdentity, ...]
+    ) -> ScopeConfig:
+        """Return a copy with dynamically provisioned identities."""
+        return ScopeConfig(
+            target=self.target,
+            allowed_hosts=self.allowed_hosts,
+            allowed_methods=self.allowed_methods,
+            forbidden_paths=self.forbidden_paths,
+            max_requests_per_second=self.max_requests_per_second,
+            max_total_requests=self.max_total_requests,
+            allow_destructive_payloads=self.allow_destructive_payloads,
+            allow_denial_of_service=self.allow_denial_of_service,
+            allow_persistence=self.allow_persistence,
+            allow_data_exfiltration=self.allow_data_exfiltration,
+            allow_production=self.allow_production,
+            test_identities=identities,
+            kill_switch_file=self.kill_switch_file,
+            provision_identities=False,
         )
 
 
@@ -216,6 +239,9 @@ def load_scope(path: Path) -> ScopeConfig:
         test_identities=identities,
         kill_switch_file=_require_string(
             raw.get("kill_switch_file", "/run/sentinelforge/STOP"), "scope.kill_switch_file"
+        ),
+        provision_identities=_require_bool(
+            raw.get("provision_identities", False), "scope.provision_identities"
         ),
     )
 
