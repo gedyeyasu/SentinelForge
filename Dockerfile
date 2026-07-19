@@ -37,9 +37,9 @@ COPY docs/ docs/
 COPY examples/ examples/
 COPY .env.example .env.example
 
-# Create .sentinelforge directory with proper perms
-RUN mkdir -p .sentinelforge/control .sentinelforge/exploits .sentinelforge/keys .sentinelforge/attestations .sentinelforge/memory && \
-    chown -R appuser:appuser /app
+# Create .sentinelforge directory with proper perms and home dir for appuser (fixes permission denied /home/appuser)
+RUN mkdir -p .sentinelforge/control .sentinelforge/exploits .sentinelforge/keys .sentinelforge/attestations .sentinelforge/memory /home/appuser/.sentinelforge && \
+    chown -R appuser:appuser /app /home/appuser
 
 # Expose control plane port
 EXPOSE 8741

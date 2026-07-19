@@ -42,7 +42,25 @@ class EngagementMemory:
     """
 
     def __init__(self, *, data_dir: Path | None = None) -> None:
-        self._data_dir = data_dir or Path.home() / ".sentinelforge" / "memory"
+        import os
+
+        if data_dir:
+            self._data_dir = data_dir
+        else:
+            # Try home, fallback to local .sentinelforge for Docker non-root with no home
+            try:
+                home = Path.home()
+                candidate = home / ".sentinelforge" / "memory"
+                # Test if we can create home/.sentinelforge
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                self._data_dir = candidate
+            except (PermissionError, OSError):
+                # Fallback to cwd/.sentinelforge/memory which exists in Docker image and is chowned to appuser
+                fallback = Path(os.environ.get("SENTINELFORGE_STATE_ROOT", ".sentinelforge")) / "memory"
+                if not fallback.is_absolute():
+                    fallback = Path.cwd() / fallback
+                fallback.mkdir(parents=True, exist_ok=True)
+                self._data_dir = fallback
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._engagements: dict[str, EngagementRecord] = {}
         self._target_history: dict[str, list[str]] = {}

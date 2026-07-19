@@ -41,7 +41,22 @@ class ThreatLearner:
     """
 
     def __init__(self, *, data_dir: Path | None = None) -> None:
-        self._data_dir = data_dir or Path.home() / ".sentinelforge" / "threats"
+        import os
+
+        if data_dir:
+            self._data_dir = data_dir
+        else:
+            try:
+                home = Path.home()
+                candidate = home / ".sentinelforge" / "threats"
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                self._data_dir = candidate
+            except (PermissionError, OSError):
+                fallback = Path(os.environ.get("SENTINELFORGE_STATE_ROOT", ".sentinelforge")) / "threats"
+                if not fallback.is_absolute():
+                    fallback = Path.cwd() / fallback
+                fallback.mkdir(parents=True, exist_ok=True)
+                self._data_dir = fallback
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._patterns: dict[str, ThreatPattern] = {}
         self._load_patterns()

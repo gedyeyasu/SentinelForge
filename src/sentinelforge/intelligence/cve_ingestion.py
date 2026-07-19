@@ -84,7 +84,22 @@ class CVEIngester:
         cache_dir: Path | None = None,
         client: httpx.Client | None = None,
     ) -> None:
-        self._cache_dir = cache_dir or Path.home() / ".sentinelforge" / "cve_cache"
+        import os
+
+        if cache_dir:
+            self._cache_dir = cache_dir
+        else:
+            try:
+                home = Path.home()
+                candidate = home / ".sentinelforge" / "cve_cache"
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                self._cache_dir = candidate
+            except (PermissionError, OSError):
+                fallback = Path(os.environ.get("SENTINELFORGE_STATE_ROOT", ".sentinelforge")) / "cve_cache"
+                if not fallback.is_absolute():
+                    fallback = Path.cwd() / fallback
+                fallback.mkdir(parents=True, exist_ok=True)
+                self._cache_dir = fallback
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._client = client or httpx.Client(timeout=30)
         self._entries: dict[str, CVEEntry] = {}
