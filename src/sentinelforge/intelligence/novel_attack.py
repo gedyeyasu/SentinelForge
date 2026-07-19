@@ -569,50 +569,98 @@ class NovelAttackSynthesizer:
         owner_identity: TestIdentity | None = None,
         attacker_identity: TestIdentity | None = None,
     ) -> list[ExploitReceipt]:
+        # Race condition hypotheses must send all steps CONCURRENTLY
+        if hypothesis.attack_class == "race_condition":
+            return self._execute_race(
+                hypothesis, owner_identity, attacker_identity
+            )
         receipts: list[ExploitReceipt] = []
         for step in hypothesis.steps:
-            headers = dict(step.headers)
-            identity_name = "anonymous"
-            if step.identity == "owner" and owner_identity:
-                headers.update(owner_identity.auth_header())
-                identity_name = owner_identity.name
-            elif attacker_identity:
-                headers.update(attacker_identity.auth_header())
-                identity_name = attacker_identity.name
-
-            started = time.monotonic()
-            try:
-                response = self._client.request(
-                    step.method, step.url, headers=headers, content=step.body
-                )
-            except Exception as error:
-                receipts.append(
-                    self._receipt(
-                        hypothesis, step, headers, identity_name,
-                        0, str(error)[:300], ExploitOutcome.ERROR,
-                        int((time.monotonic() - started) * 1000),
-                    )
-                )
-                continue
-            duration_ms = int((time.monotonic() - started) * 1000)
-            outcome = self._evaluate(hypothesis, step, response)
-            cross_tenant_data = False
-            owner_body_hash = ""
-            if outcome is ExploitOutcome.SUCCESS and owner_identity and attacker_identity:
-                cross_tenant_data, owner_body_hash = self._check_cross_tenant(
-                    step, owner_identity, response
-                )
-            receipts.append(
-                self._receipt(
-                    hypothesis, step, headers, identity_name,
-                    response.status_code, response.body, outcome, duration_ms,
-                    extra={
-                        "cross_tenant_data": cross_tenant_data,
-                        "owner_body_sha256": owner_body_hash,
-                    },
-                )
+            r = self._execute_step(
+                hypothesis, step, owner_identity, attacker_identity
             )
+            if isinstance(r, list):
+                receipts.extend(r)
+            else:
+                receipts.append(r)
         return receipts
+
+    def _execute_race(
+        self,
+        hypothesis: AttackHypothesis,
+        owner_identity: TestIdentity | None,
+        attacker_identity: TestIdentity | None,
+    ) -> list[ExploitReceipt]:
+        """Send race condition steps concurrently in real threads."""
+        import threading as _threading
+
+        all_results: list[list[ExploitReceipt]] = []
+        threads: list[_threading.Thread] = []
+
+        def _do_step(step: AttackStep) -> None:
+            r = self._execute_step(
+                hypothesis, step, owner_identity, attacker_identity
+            )
+            all_results.append(
+                r if isinstance(r, list) else [r]
+            )
+
+        for step in hypothesis.steps:
+            t = _threading.Thread(target=_do_step, args=(step,))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join(timeout=15)
+
+        receipts: list[ExploitReceipt] = []
+        for sublist in all_results:
+            receipts.extend(sublist)
+        return receipts
+
+    def _execute_step(
+        self,
+        hypothesis: AttackHypothesis,
+        step: AttackStep,
+        owner_identity: TestIdentity | None,
+        attacker_identity: TestIdentity | None,
+    ) -> ExploitReceipt:
+        headers = dict(step.headers)
+        identity_name = "anonymous"
+        if step.identity == "owner" and owner_identity:
+            headers.update(owner_identity.auth_header())
+            identity_name = owner_identity.name
+        elif attacker_identity:
+            headers.update(attacker_identity.auth_header())
+            identity_name = attacker_identity.name
+
+        started = time.monotonic()
+        try:
+            response = self._client.request(
+                step.method, step.url, headers=headers, content=step.body
+            )
+        except Exception as error:
+            return self._receipt(
+                hypothesis, step, headers, identity_name,
+                0, str(error)[:300], ExploitOutcome.ERROR,
+                int((time.monotonic() - started) * 1000),
+            )
+        duration_ms = int((time.monotonic() - started) * 1000)
+        outcome = self._evaluate(hypothesis, step, response)
+        cross_tenant_data = False
+        owner_body_hash = ""
+        if outcome is ExploitOutcome.SUCCESS and owner_identity and attacker_identity:
+            cross_tenant_data, owner_body_hash = self._check_cross_tenant(
+                step, owner_identity, response
+            )
+        return self._receipt(
+            hypothesis, step, headers, identity_name,
+            response.status_code, response.body, outcome, duration_ms,
+            extra={
+                "cross_tenant_data": cross_tenant_data,
+                "owner_body_sha256": owner_body_hash,
+            },
+        )
 
     def _check_cross_tenant(
         self,
