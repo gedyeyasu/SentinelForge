@@ -683,6 +683,8 @@ class NovelAttackSynthesizer:
     ) -> ExploitReceipt:
         extra = extra or {}
         finding_id = f"novel-{hypothesis.attack_class}-{hypothesis.hypothesis_id[-6:]}"
+        body_lower = (body or "").lower()
+        is_crash = status >= 500 and ("integrityerror" in body_lower or "race" in hypothesis.attack_class)
         return ExploitReceipt(
             receipt_id="rcpt_" + uuid.uuid4().hex[:12],
             finding_id=finding_id,
@@ -698,15 +700,13 @@ class NovelAttackSynthesizer:
                 f"Server must reject {hypothesis.attack_class}: "
                 f"{hypothesis.title}"
             ),
-            body_lower = (body or "").lower()
-            is_crash = status >= 500 and ("integrityerror" in body_lower or "race" in hypothesis.attack_class)
             observed_behavior=(
                 (
-                    "☠️ SERVER CRASHED: Race condition caused IntegrityError 500. "
+                    "SERVER CRASHED: Race condition caused IntegrityError 500. "
                     f"Evidence: {body.replace(chr(10), ' ')[:120]}. "
                     if is_crash
                     else (
-                        "⚠️ CROSS-TENANT DATA LEAKED: Attacker accessed owner's resource. "
+                        "CROSS-TENANT DATA LEAKED: Attacker accessed owner's resource. "
                         if extra.get("cross_tenant_data")
                         else ""
                     )
@@ -721,7 +721,7 @@ class NovelAttackSynthesizer:
             ),
             outcome=outcome,
             confidence=(
-                0.95 if extra.get("cross_tenant_data")
+                0.95 if extra.get("cross_tenant_data") or is_crash
                 else 0.85 if outcome is ExploitOutcome.SUCCESS
                 else 0.5
             ),
