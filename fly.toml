@@ -6,6 +6,8 @@ primary_region = "iad"
 
 [env]
   PORT = "8741"
+  SENTINELFORGE_HOST = "0.0.0.0"
+  SENTINELFORGE_PORT = "8741"
   SENTINELFORGE_ALLOWED_ROOTS = "/app"
   SENTINELFORGE_DB_PATH = "/app/.sentinelforge/control.db"
   PYTHONUNBUFFERED = "1"
