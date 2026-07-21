@@ -1591,6 +1591,28 @@ async function verifyOwnership() {
 }
 
 // ===== SCHEDULES =====
+function hasLocalScheduleAdministration() {
+  return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(window.location.hostname);
+}
+
+function configureScheduleAdministration() {
+  if (hasLocalScheduleAdministration()) {
+    loadSchedules();
+    return;
+  }
+  const controls = ui.scheduleForm.querySelectorAll("input, select, button");
+  controls.forEach(control => { control.disabled = true; });
+  ui.refreshSchedules.disabled = true;
+  ui.schedulesList.replaceChildren();
+  const notice = document.createElement("li");
+  notice.className = "candidate-empty";
+  text(
+    notice,
+    "Remote schedule administration is disabled in the public demo. Run locally, or use the authenticated API with X-SentinelForge-Admin.",
+  );
+  ui.schedulesList.append(notice);
+}
+
 async function createSchedule(e) {
   e?.preventDefault(); clearError(ui.scheduleError);
   try {
@@ -1736,7 +1758,8 @@ function initialize() {
   const refreshBtn = document.querySelector("#github-repos-refresh-btn");
   if (refreshBtn) refreshBtn.addEventListener("click", () => loadGithubReposList());
 
-  checkIntegrations(); loadRedHatIntelligence(); loadPentestRuns(); loadSchedules();
+  checkIntegrations(); loadRedHatIntelligence(); loadPentestRuns();
+  configureScheduleAdministration();
   checkGithubOAuthStatus();
   switchView("scan");
   resumeActiveJobs();
