@@ -17,6 +17,8 @@ dependencies = [
   "packaging>=24.0,<26",
   "hiddenlayer-sdk>=0.2.0",
   "cryptography>=45,<47",
+  # Patch verification executes repository tests in the deployed worker.
+  "pytest>=8,<10",
 ]
 
 [project.optional-dependencies]
