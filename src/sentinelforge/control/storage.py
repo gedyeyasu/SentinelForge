@@ -408,7 +408,13 @@ class SQLiteRunStore:
     ) -> list[PentestRunRecord]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM pentest_runs ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                """
+                SELECT run_id, repository, scope_file, status, phase,
+                    candidate_verdict, mode, target_type, staging_url,
+                    created_at, updated_at, NULL AS results_json, error
+                FROM pentest_runs
+                ORDER BY created_at DESC LIMIT ? OFFSET ?
+                """,
                 (limit, offset),
             ).fetchall()
         return [self._pentest_record(row) for row in rows]

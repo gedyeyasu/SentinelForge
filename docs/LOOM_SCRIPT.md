@@ -1,5 +1,7 @@
 # SentinelForge: four-minute Loom recording script
 
+> **Legacy AITX submission artifact.** Do not use this script for OpenAI Build Week. The current requirement is a public or unlisted YouTube video under three minutes; use [`YOUTUBE_SCRIPT.md`](YOUTUBE_SCRIPT.md).
+
 This is the truth-checked presenter script for the AITX Community x NVIDIA
 Claw Agent Hackathon. The target length is four minutes and thirty seconds.
 Keep the camera bubble on, speak conversationally, and leave the cursor beside

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -86,12 +85,6 @@ class PRCreatorAgent:
                 self.pr_generator._git(repository, "checkout", branch_name)
             except Exception:
                 raise RuntimeError(f"Failed to create fix branch {branch_name}: {e}") from e
-
-        # Apply patches from bundle to repo dir (isolated worktree already has patches, now apply to PR branch)
-        # For simplicity, copy patched files from bundle.patched_root to repository
-        patched_root = patch_bundle.patched_root if hasattr(patch_bundle, "patched_root") else repository
-        # In real flow, materialize_proposal already wrote files, we need to apply them
-        # Here we assume bundle has files list
 
         # Generate PR body with evidence
         pr_body = self.pr_generator.generate_pr_body(
@@ -232,7 +225,6 @@ class PatchAndPRAgent:
             }
 
         # Step 2: Patch vulnerabilities - code worker
-        start = time.time()
         candidates = self.code_worker.work_on_code(finding, repository, run_root, use_nemotron=True)
         selected = self.code_worker.rank_and_select(candidates)
 

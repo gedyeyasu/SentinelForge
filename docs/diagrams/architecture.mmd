@@ -28,7 +28,7 @@ graph TD
 
     R --> S{All Blocked?}
     S -->|No| Q
-    S -->|Yes| T[Release Auditor<br/>Signed Attestation<br/>HMAC Hash Chain + VEX + SARIF]
+    S -->|Yes| T[Release Auditor<br/>Signed Attestation<br/>Ed25519 + VEX + SARIF]
 
     T --> U[GitHub PR<br/>Secure clone askpass<br/>Check Runs annotation<br/>SARIF upload]
 

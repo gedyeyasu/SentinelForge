@@ -157,8 +157,6 @@ class GitHubOAuthManager:
             "state": state,
             "allow_signup": "false",
         }
-        query = "&".join(f"{k}={httpx.QueryParams({k: v})[k]}" for k, v in params.items())
-        # Manually build for clarity
         from urllib.parse import urlencode
 
         query_str = urlencode(params)
@@ -174,7 +172,6 @@ class GitHubOAuthManager:
             raise ValueError("Invalid or expired OAuth state - possible CSRF")
 
         # Clean state after use
-        redirect_after = self._states[state].redirect_after
         del self._states[state]
         self._save_states()
 

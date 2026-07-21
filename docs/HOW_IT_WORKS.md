@@ -1,5 +1,7 @@
 # How SentinelForge Works — Quick Start Guide
 
+> **Legacy AITX technical guide.** Some sponsor, roster, and recording details below describe the July 2026 AITX version. For the current OpenAI Build Week architecture, start with [`../README.md`](../README.md) and [`OPENAI_BUILD_WEEK.md`](OPENAI_BUILD_WEEK.md).
+
 > **You asked: Where is the architecture doc so I can read it?**
 > **Answer: Read these in order — all in `docs/` folder.**
 
@@ -10,7 +12,7 @@
 | **START HERE** `ARCHITECTURE_DETAILED.md` | `docs/ARCHITECTURE_DETAILED.md` | 600+ lines: Tech stack table, sponsor tools deep integration table (9 sponsors), end-to-end flow for scanner vs pentest, Mermaid diagram, Cini backend test, safety boundary, demo checklist |
 | **Diagram Source** `architecture.mmd` | `docs/diagrams/architecture.mmd` | Mermaid source for architecture diagram — paste into https://mermaid.live/ to render PNG, or `npx mmdc -i architecture.mmd -o architecture.png` |
 | **Flow Finding→Patch** `FLOW_FINDING_TO_PATCH.md` | `docs/FLOW_FINDING_TO_PATCH.md` | How we BLOCK destructive actions (DROP TABLE, rm -rf) but DO powerful Fable-level exploits, evidence report with Create Patch PR button, patch agent flow, human review required + release blocked |
-| **NemoClaw Setup** `NEMOCLAW_SETUP.md` | `docs/NEMOCLAW_SETUP.md` | **NEW** NemoClaw persistent orchestrator, heartbeat, 14 agents roster including code_worker (works on code), pr_creator (creates PR against GitHub repo), patch_and_pr (patches after exploit successful) — per your request |
+| **NemoClaw Setup** `NEMOCLAW_SETUP.md` | `docs/NEMOCLAW_SETUP.md` | NemoClaw-style persistent orchestration, heartbeat, and the 15-agent roster including the advisory GPT evidence judge |
 | **GitHub OAuth** `GITHUB_OAUTH.md` | `docs/GITHUB_OAUTH.md` | **NEW** OAuth super cool one-click connect, repo listing, secure clone via GIT_ASKPASS, scan flow, Loom demo script, security considerations |
 | **Cini Live Pentest** `CINI_PENTEST_GUIDE.md` | `docs/CINI_PENTEST_GUIDE.md` | How to test pentesting tool on your Cini backend deployed on AWS https://api.cini.love/api/v1 via WebUI for Loom demo, scope-cini.yaml, ownership verification |
 | **HiddenLayer Track 3** `HIDDENLAYER_TRACK3.md` | `docs/HIDDENLAYER_TRACK3.md` | Track 3 runtime security: how we instrument every boundary (prompts, responses, tool calls, tool results, ingested content), thoughtful policy self-correction vs quarantine vs redact vs block |
@@ -20,7 +22,7 @@
 | **Short Arch** `ARCHITECTURE.md` | `docs/ARCHITECTURE.md` | Short ASCII diagram from PLAN §5, file layout |
 | **Plan** `PLAN.md` | `docs/PLAN.md` | Original build plan with P0/P1/P2 acceptance criteria, sponsor contract table, state model, lakes |
 | **Heartbeat** `HEARTBEAT.md` | `HEARTBEAT.md` and `.nemo/HEARTBEAT.md` | NemoClaw cursor, learning delta Run1 42 calls → Run2 14 calls -66%, advisory events, roster + code_worker + pr_creator + patch_and_pr |
-| **Agents Roster** `agents.yaml` | `config/agents.yaml` | **14 agents** now including code_worker (works on code), pr_creator (creates PR against GitHub repo), patch_and_pr (patches after exploit successful) per your request — was 11 |
+| **Agents Roster** `agents.yaml` | `config/agents.yaml` | **15 agents**, including code_worker, pr_creator, patch_and_pr, and the advisory GPT evidence judge |
 | **Policy** `openshell-policy.yaml` | `config/openshell-policy.yaml` | 13 rules deny-by-default, includes DB nuking blocked (DROP TABLE, TRUNCATE, DELETE without WHERE), plus cini policy allows api.cini.love |
 | **Supabase Schema** `supabase_schema.sql` | `docs/supabase_schema.sql` | Multi-tenant RLS for SaaS: orgs, memberships, api_keys, audit_logs, vex_documents, agent_traces |
 | **.env Placeholders** `.env` | `.env` | Now has GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET placeholders for you to paste — plus GITHUB_TOKEN, NVIDIA_API_KEY, HIDDENLAYER_CLIENT_ID/SECRET, etc. |
@@ -46,7 +48,7 @@
 6. Finding Validator: replays receipt, checks reproducibility, HiddenLayer verdict
 7. Patch Engineer: deterministic baseline (inserts tenant_id check + regression test) + Nemotron via NIM/vLLM guided_json, safety checks max 100KB, 3 files, 100 lines
 8. Adversarial Verifier: mutates original exploit 3 ways (lowercase, url-encoded %2F, param pollution) and replays against patched artifact - must all be BLOCKED per PLAN §7.4
-9. Release Auditor: signed attestation HMAC hash chain (prev_hash linking), VEX doc, SARIF 2.1.0, Check Run annotation at file:line, PR body with SHA256, evidence hash, human review required, secret redaction gate
+9. Release Auditor: Ed25519-signed attestation with an embedded public verification key, VEX doc, SARIF 2.1.0, Check Run annotation at file:line, PR body with SHA256, evidence hash, human review required, secret redaction gate
 10. GitHub PR: secure clone via GIT_ASKPASS (no token leak), create branch sentinelforge/fix-{rule}/{id}, commit, push, gh pr create --draft --base main --head branch (draft = human review required)
 11. Human Review Gate: agents.yaml no_agent_can_merge_pr true, PR draft requires 1 approver via branch protection, if existing tests fail or blast radius > limits release BLOCKED, dashboard final report shows REQUIRED - RELEASE BLOCKED
 12. Final Report: Finding summary + custom exploits written proof + patch minimal + verification 3 mutations blocked + attestation signed + PR + VEX + SARIF + Check Runs + human gate
@@ -117,7 +119,7 @@
    2. CUSTOM EXPLOITS: X Python files written at runtime to .sentinelforge/exploits/{run_id}/ - PROVES NOT TOY
    3. PATCH: patch_engineer generates competing patches via deterministic + Nemotron, minimal blast radius (<3 files, <100 lines)
    4. VERIFICATION: adversarial_verifier mutates original exploit 3 ways and replays against patched artifact - must all BLOCKED per PLAN 7.4
-   5. ATTESTATION: Signed JSON with HMAC hash chain, evidence hash, stored in .sentinelforge/attestations/
+   5. ATTESTATION: Ed25519-signed JSON with evidence hash and embedded public verification key, stored in .sentinelforge/attestations/
    6. PR: GitHub API creates branch, push, gh pr create --draft with body containing severity, rule_id, SHA256, evidence hash - requires human review
    7. HUMAN REVIEW GATE: no_agent_can_merge_pr true + branch protection requiring 1 approver + status checks. If functionality change (existing tests fail or blast radius > limits), release BLOCKED until human approves.
    8. FINAL REPORT: This report + attestation + VEX + SARIF + Check Runs + PR. If BLOCKED, release pipeline stops.

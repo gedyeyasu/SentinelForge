@@ -64,7 +64,7 @@ def test_oauth_state_csrf_protection(tmp_path):
     # Invalid state should fail
     try:
         mgr.exchange_code_for_token("some_code", "invalid_state")
-        assert False, "Should have raised for invalid state"
+        raise AssertionError("Should have raised for invalid state")
     except ValueError as e:
         assert "Invalid or expired OAuth state" in str(e)
 

@@ -287,7 +287,7 @@ Final Report (Dashboard Pentest View Final Report Panel)
   2. CUSTOM EXPLOITS: X Python files written at runtime to .sentinelforge/exploits/{run_id}/ - PROVES NOT TOY
   3. PATCH: patch_engineer generates competing patches via deterministic + Nemotron, minimal blast radius
   4. VERIFICATION: adversarial_verifier mutates original exploit 3 ways and replays against patched artifact - must all BLOCKED per PLAN 7.4
-  5. ATTESTATION: Signed JSON with HMAC hash chain, evidence hash, stored in .sentinelforge/attestations/
+  5. ATTESTATION: Ed25519-signed JSON with evidence hash and embedded public verification key, stored in .sentinelforge/attestations/
   6. PR: GitHub API creates branch, push, pr create with body containing severity, rule_id, SHA256, evidence hash - requires human review, draft
   7. HUMAN REVIEW GATE: no_agent_can_merge_pr true + branch protection requiring 1 approver, if functionality change release BLOCKED
   8. FINAL REPORT: This report + attestation + VEX doc + SARIF + Check Runs + PR. If BLOCKED, release pipeline stops.

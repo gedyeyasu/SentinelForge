@@ -177,7 +177,7 @@ def test_vex_evaluator_no_impact(tmp_path):
     )
 
     parser = SBOMParser()
-    sbom = parser.parse_project(tmp_path)
+    parser.parse_project(tmp_path)
     # Manually add component for test
     from sentinelforge.agents.sbom import SBOMComponent
 
@@ -204,7 +204,7 @@ def test_redaction():
     # PR body secret gate should raise
     try:
         assert_no_secrets({"body": "my token is Bearer abc.def.ghi and GITHUB_TOKEN=ghp_1234567890123456789012345678901234"})
-        assert False, "Should have raised"
+        raise AssertionError("Should have raised")
     except ValueError:
         pass
 
@@ -216,11 +216,14 @@ def test_attestation_signing():
     assert signed.evidence_hash
     assert signed.signature
     assert signer.verify(signed) is True
+    assert AttestationSigner(key_dir=Path("other_test_keys")).verify(signed) is True
     # Cleanup
     import shutil
 
     if Path("tmp_test_keys").exists():
         shutil.rmtree("tmp_test_keys")
+    if Path("other_test_keys").exists():
+        shutil.rmtree("other_test_keys")
 
 
 def test_openshell_policy_load():

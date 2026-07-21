@@ -116,7 +116,7 @@ Supabase future (docs/supabase_schema.sql):
 ```
 SentinelForge/ v0.2.0 Latest - 14 NemoClaw agents + GitHub OAuth + Django discovery + Cini live
   config/
-    agents.yaml                 # 14 bounded agents roster NemoClaw contract: main, surface_mapper, auth_attacker 7 techniques, injection_attacker 10+10 synthetic, exploit_writer writes new Python file per run PROOF NOT TOY, logic_attacker, dependency_hunter SBOM+VEX, finding_validator, patch_engineer, code_worker works on code, pr_creator creates PR, patch_and_pr full flow, adversarial_verifier 3 mutations, release_auditor signed attestation
+    agents.yaml                 # 15 bounded agents, including the GPT-5.6 evidence judge
     openshell-policy.yaml       # deny-by-default 13 rules including DB nuking DROP TABLE/TRUNCATE/DELETE without WHERE, rm -rf
     openshell-policy-cini.yaml  # allows api.cini.love for live Cini demo, blocks DELETE for safety
     scope.yaml                  # default local 127.0.0.1, 3 rps
@@ -167,12 +167,12 @@ SentinelForge/ v0.2.0 Latest - 14 NemoClaw agents + GitHub OAuth + Django discov
       continuous_scanner.py
       threat_feed.py
     control/
-      api.py                    # FastAPI control plane 40+ endpoints: /api/github/oauth/start, /api/github/oauth/callback, /api/github/oauth/config, /api/github/repos with search/sort, /api/agents (14 agents), /api/heartbeat, /api/learning/invariants, /api/learning/memory/{id}, /api/pentest/{id}/traces with token trace
+      api.py                    # FastAPI control plane, quotas, admin-gated schedules, integrations, and run evidence
       storage.py                # SQLite event store with 8 tables: runs, events, pentest_runs, pentest_schedules, security_invariants, target_memory, advisory_cursor, agent_traces
       models.py                 # Pydantic models
       service.py                # detection run service with ranking
     redaction.py                # secret scrubbing before persistence/PR (Bearer, api_key, ghp_*, private keys)
-    attestation.py              # HMAC-signed attestation with hash chain, keypair in .sentinelforge/keys/, tamper detection
+    attestation.py              # Ed25519-signed attestation with hash chain and public verification
     environment.py              # env detection prod/staging/dev with confidence
     verification.py             # enterprise ownership verification ACME-style challenge-response
     ownership.py                # simple ownership proof file/DNS/HTTP
@@ -185,9 +185,9 @@ SentinelForge/ v0.2.0 Latest - 14 NemoClaw agents + GitHub OAuth + Django discov
     web/static/                 # forensic dashboard SPA 5 views: Scan with GitHub OAuth repo list + filter + Scan button, Release Proof, Pentest with custom exploit blue highlight + evidence PR buttons + final report 8 steps + human review gate, Schedule, Settings with OAuth connect/disconnect
   docs/
     PLAN.md                     # build plan
-    DEMO.md                     # 5:30 demo script updated with 14 agents, custom exploit writer, GitHub OAuth, Cini live, Track 3
+    DEMO.md                     # Legacy AITX demo script retained for project history
     SECURITY.md                 # safety boundary 10 layers + DB nuking blocked
-    ARCHITECTURE.md             # this file (updated to 14 agents)
+    ARCHITECTURE.md             # this file (updated to 15 agents)
     ARCHITECTURE_DETAILED.md    # 600+ lines tech stack, sponsor deep integration table, Mermaid diagram with Track 3 + custom exploit
     FLOW_FINDING_TO_PATCH.md    # destructive blocked vs powerful Fable-level, evidence PR button, patch flow, human gate
     HOW_IT_WORKS.md             # doc map with absolute paths
@@ -204,7 +204,7 @@ SentinelForge/ v0.2.0 Latest - 14 NemoClaw agents + GitHub OAuth + Django discov
   examples/vulnerable_shop/     # two-tenant BOLA fixture
   tests/                        # 233 tests (was 178) including test_custom_exploit.py, test_github_oauth.py, test_enterprise.py
   Makefile                      # one-command targets: install, test, lint, api, demo-reset, bench, vllm-health, nim-health, gh-list, e2e
-  HEARTBEAT.md                  # NemoClaw cursor + learning delta Run1 vs Run2, roster 14 agents, code_worker, pr_creator, patch_and_pr
+  HEARTBEAT.md                  # NemoClaw cursor + learning delta and 15-agent roster
   .nemo/HEARTBEAT.md            # copy for NemoClaw contract
   fly.toml                      # Fly.io deployment: app sentinelforge, region iad, port 8741, volume mount .sentinelforge
   render.yaml                   # Render deployment: Docker, healthCheck /health, env vars

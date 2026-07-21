@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
 import threading
 import time
 import uuid
+from collections import defaultdict, deque
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -52,6 +55,35 @@ from sentinelforge.scope import ScopeValidationError, load_scope
 from sentinelforge.verification import OwnershipVerificationService, VerificationMethod
 
 logger = logging.getLogger(__name__)
+
+
+class _PublicRunQuota:
+    """Small in-process abuse guard for the public hackathon deployment."""
+
+    def __init__(self, *, per_client: int = 3, global_limit: int = 30) -> None:
+        self._per_client = per_client
+        self._global_limit = global_limit
+        self._window_seconds = 3600.0
+        self._clients: dict[str, deque[float]] = defaultdict(deque)
+        self._global: deque[float] = deque()
+        self._lock = threading.Lock()
+
+    def allow(self, client_id: str, *, trusted: bool = False) -> bool:
+        if trusted:
+            return True
+        now = time.monotonic()
+        cutoff = now - self._window_seconds
+        with self._lock:
+            while self._global and self._global[0] < cutoff:
+                self._global.popleft()
+            client = self._clients[client_id]
+            while client and client[0] < cutoff:
+                client.popleft()
+            if len(self._global) >= self._global_limit or len(client) >= self._per_client:
+                return False
+            self._global.append(now)
+            client.append(now)
+        return True
 
 
 def _propose_scan_patch(repo_dir: Path, finding: dict[str, Any]) -> tuple[dict[str, str], str]:
@@ -235,9 +267,60 @@ def create_app(
     )
     pentest_service = PentestService(service.store)
     scheduler = PentestScheduler(service.store)
-    app = FastAPI(title="SentinelForge Control Plane", version="0.2.0")
+    run_quota = _PublicRunQuota()
+
+    def scheduled_execute(
+        request: PentestRunRequest,
+        scope: Any,
+        schedule: Any,
+    ) -> None:
+        pentest_service.create_and_start(request, scope=scope)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        scheduler.set_executor(scheduled_execute)
+        await scheduler.start()
+        try:
+            yield
+        finally:
+            await scheduler.stop()
+
+    app = FastAPI(
+        title="SentinelForge Control Plane",
+        version="0.2.0",
+        lifespan=lifespan,
+    )
     static_root = Path(__file__).parents[1] / "web" / "static"
     app.mount("/assets", StaticFiles(directory=static_root), name="assets")
+
+    def is_trusted_request(request: Request) -> bool:
+        host = request.client.host if request.client else "unknown"
+        if host in {"127.0.0.1", "::1", "testclient"}:
+            return True
+        expected = os.environ.get("SENTINELFORGE_ADMIN_TOKEN", "").strip()
+        supplied = request.headers.get("x-sentinelforge-admin", "")
+        return bool(expected and supplied and hmac.compare_digest(expected, supplied))
+
+    def enforce_run_quota(request: Request) -> None:
+        host = request.client.host if request.client else "unknown"
+        if not run_quota.allow(host, trusted=is_trusted_request(request)):
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Public demo quota exceeded. Try again later or run "
+                    "SentinelForge locally."
+                ),
+            )
+
+    def require_admin(request: Request) -> None:
+        if is_trusted_request(request):
+            return
+        if not os.environ.get("SENTINELFORGE_ADMIN_TOKEN", "").strip():
+            raise HTTPException(
+                status_code=503,
+                detail="Remote schedule administration is disabled.",
+            )
+        raise HTTPException(status_code=401, detail="Valid administrator token required")
 
     @app.get("/", include_in_schema=False)
     def dashboard() -> FileResponse:
@@ -249,10 +332,11 @@ def create_app(
 
     @app.get("/api/integrations")
     def integrations() -> dict[str, dict[str, object]]:
-        from sentinelforge.config import resolve_vllm_config
+        from sentinelforge.config import resolve_openai_config, resolve_vllm_config
         from sentinelforge.integrations.openshell import get_policy
 
         nvidia = resolve_nvidia_config()
+        openai = resolve_openai_config()
         vllm_cfg = resolve_vllm_config()
         # vLLM health quick check (no network call if not configured, just config)
         vllm_status = "awaiting_host"
@@ -281,6 +365,12 @@ def create_app(
                 "model": nvidia.model,
                 "base_url": nvidia.base_url,
             },
+            "openai_gpt56": {
+                "status": "configured" if openai.configured else "awaiting_key",
+                "model": openai.model,
+                "role": "independent_evidence_judge",
+                "authority": "advisory_only_human_gate_required",
+            },
             "vllm": {
                 "status": vllm_status,
                 "model": vllm_cfg.model,
@@ -297,7 +387,9 @@ def create_app(
             "github": {
                 "status": "configured" if os.environ.get("GITHUB_TOKEN") else "awaiting_key",
             },
-            "pentest_scheduler": {"status": "active"},
+            "pentest_scheduler": {
+                "status": "active" if scheduler.running else "configured"
+            },
             "brev": {"status": "manifest_exists", "doc": "docs/BREV.md"},
             "nemoclaw": {
                 "status": "active" if Path("config/agents.yaml").is_file() else "missing",
@@ -404,7 +496,12 @@ def create_app(
             ) from error
 
     @app.post("/api/runs", response_model=RunRecord, status_code=202)
-    def create_run(request: DetectionRunRequest, tasks: BackgroundTasks) -> RunRecord:
+    def create_run(
+        request: DetectionRunRequest,
+        tasks: BackgroundTasks,
+        http_request: Request,
+    ) -> RunRecord:
+        enforce_run_quota(http_request)
         try:
             run = service.create(Path(request.repository))
         except RepositoryNotAuthorizedError as error:
@@ -426,7 +523,11 @@ def create_app(
         return service.store.list_events(run_id, after=after)
 
     @app.post("/api/pentest")
-    def create_pentest(request: PentestRunRequest) -> dict[str, object]:
+    def create_pentest(
+        request: PentestRunRequest,
+        http_request: Request,
+    ) -> dict[str, object]:
+        enforce_run_quota(http_request)
         scope_path = Path(request.scope_file)
         if not scope_path.is_file():
             raise HTTPException(
@@ -459,16 +560,78 @@ def create_app(
     def pentest_modes() -> list[dict[str, object]]:
         return list_modes()
 
+    # Static schedule routes must be registered before /api/pentest/{run_id};
+    # otherwise Starlette treats the literal word "schedule" as a run ID.
+    @app.post("/api/pentest/schedule")
+    def create_pentest_schedule(
+        request: Request,
+        repository: str = Query(min_length=1),
+        scope_file: str = Query(default="config/scope.yaml"),
+        mode: str = Query(default="standard"),
+        interval_minutes: int = Query(ge=5, le=1440, default=60),
+    ) -> dict[str, object]:
+        require_admin(request)
+        try:
+            service.authorize_repository(Path(repository))
+        except RepositoryNotAuthorizedError as error:
+            raise HTTPException(status_code=403, detail=str(error)) from error
+        scope_path = Path(scope_file)
+        if not scope_path.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Scope file not found: {scope_path}",
+            )
+        try:
+            PentestMode(mode)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid mode: {mode}. "
+                f"Valid: {', '.join(m.value for m in PentestMode)}",
+            ) from None
+        schedule = scheduler.create_schedule(
+            repository=repository,
+            scope_file=scope_file,
+            mode=mode,
+            interval_minutes=interval_minutes,
+        )
+        return schedule.model_dump()
+
+    @app.get("/api/pentest/schedule")
+    def list_pentest_schedules(request: Request) -> dict[str, object]:
+        require_admin(request)
+        schedules = scheduler.list_schedules()
+        return {"schedules": [schedule.model_dump() for schedule in schedules]}
+
+    @app.delete("/api/pentest/schedule/{schedule_id}")
+    def delete_pentest_schedule(schedule_id: str, request: Request) -> dict[str, str]:
+        require_admin(request)
+        deleted = scheduler.delete_schedule(schedule_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        return {"status": "deleted", "schedule_id": schedule_id}
+
     @app.get("/api/pentest/{run_id}")
-    def get_pentest_run(run_id: str) -> dict[str, object]:
+    def get_pentest_run(
+        run_id: str,
+        compact: bool = Query(default=False),
+    ) -> dict[str, object]:
         pentest = service.store.get_pentest_run(run_id)
         if pentest is None:
             raise HTTPException(status_code=404, detail="Pentest run not found")
         events = service.store.list_events(run_id)
-        return {
+        response: dict[str, object] = {
             "pentest_run": pentest.model_dump(),
             "events": [e.model_dump() for e in events],
         }
+        if compact:
+            run = response["pentest_run"]
+            if isinstance(run, dict):
+                run["results"] = None
+            event_list = response["events"]
+            if isinstance(event_list, list):
+                response["events"] = event_list[-50:]
+        return response
 
     @app.get("/api/pentest/{run_id}/events")
     def list_pentest_events(
@@ -652,49 +815,6 @@ def create_app(
                 "configured GitHub token. Human review is always required."
             ),
         }
-
-    @app.post("/api/pentest/schedule")
-    def create_pentest_schedule(
-        repository: str = Query(min_length=1),
-        scope_file: str = Query(default="config/scope.yaml"),
-        mode: str = Query(default="standard"),
-        interval_minutes: int = Query(ge=5, le=1440, default=60),
-    ) -> dict[str, object]:
-        scope_path = Path(scope_file)
-        if not scope_path.is_file():
-            raise HTTPException(
-                status_code=400,
-                detail=f"Scope file not found: {scope_path}",
-            )
-        try:
-            PentestMode(mode)
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid mode: {mode}. "
-                f"Valid: {', '.join(m.value for m in PentestMode)}",
-            ) from None
-        schedule = scheduler.create_schedule(
-            repository=repository,
-            scope_file=scope_file,
-            mode=mode,
-            interval_minutes=interval_minutes,
-        )
-        return schedule.model_dump()
-
-    @app.get("/api/pentest/schedule")
-    def list_pentest_schedules() -> dict[str, object]:
-        schedules = scheduler.list_schedules()
-        return {
-            "schedules": [s.model_dump() for s in schedules],
-        }
-
-    @app.delete("/api/pentest/schedule/{schedule_id}")
-    def delete_pentest_schedule(schedule_id: str) -> dict[str, str]:
-        deleted = scheduler.delete_schedule(schedule_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Schedule not found")
-        return {"status": "deleted", "schedule_id": schedule_id}
 
     # --- GitHub Integration (Token + OAuth) ---
 

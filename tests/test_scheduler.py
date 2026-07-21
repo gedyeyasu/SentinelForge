@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 from sentinelforge.control.storage import SQLiteRunStore
@@ -107,3 +108,35 @@ def test_enabled_only_filter(tmp_path: Path) -> None:
     enabled = sched.list_schedules(enabled_only=True)
     assert len(enabled) == 1
     assert enabled[0].repository == "repo2"
+
+
+def test_scheduled_run_preserves_selected_mode(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    sched = PentestScheduler(store)
+    scope_path = tmp_path / "scope.yaml"
+    scope_path.write_text(
+        """\
+target:
+  base_url: "http://127.0.0.1:8000"
+allowed_hosts: ["127.0.0.1"]
+test_identities: []
+""",
+        encoding="utf-8",
+    )
+    schedule = sched.create_schedule(
+        repository=str(tmp_path),
+        scope_file=str(scope_path),
+        mode="full",
+        interval_minutes=60,
+    )
+    captured = {}
+
+    def execute(request, scope, current_schedule) -> None:
+        captured["request"] = request
+        captured["schedule"] = current_schedule
+
+    sched.set_executor(execute)
+    asyncio.run(sched._run_schedule(schedule))
+
+    assert captured["request"].mode.value == "full"
+    assert captured["schedule"].schedule_id == schedule.schedule_id

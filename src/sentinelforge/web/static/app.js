@@ -63,6 +63,14 @@ const ui = {
   testCount: document.querySelector("#test-count"),
   verificationDuration: document.querySelector("#verification-duration"),
   verificationOutput: document.querySelector("#verification-output"),
+  gptReviewStatus: document.querySelector("#gpt-review-status"),
+  gptReviewEmpty: document.querySelector("#gpt-review-empty"),
+  gptReviewDetail: document.querySelector("#gpt-review-detail"),
+  gptReviewDecision: document.querySelector("#gpt-review-decision"),
+  gptReviewRisk: document.querySelector("#gpt-review-risk"),
+  gptReviewModel: document.querySelector("#gpt-review-model"),
+  gptReviewSummary: document.querySelector("#gpt-review-summary"),
+  gptReviewHumanChecks: document.querySelector("#gpt-review-human-checks"),
   downloadEvidence: document.querySelector("#download-evidence"),
   repeatRun: document.querySelector("#repeat-run"),
   connectionDot: document.querySelector("#connection-dot"),
@@ -70,6 +78,8 @@ const ui = {
   themeToggle: document.querySelector("#theme-toggle"),
   nimIntegration: document.querySelector("#nim-integration"),
   nimIntegrationStatus: document.querySelector("#nim-integration-status"),
+  openaiIntegration: document.querySelector("#openai-integration"),
+  openaiIntegrationStatus: document.querySelector("#openai-integration-status"),
   githubIntegration: document.querySelector("#github-integration"),
   githubIntegrationStatus: document.querySelector("#github-integration-status"),
   intelligenceForm: document.querySelector("#intelligence-form"),
@@ -182,6 +192,9 @@ const eventDescriptions = {
   orchestration_started: ["Orchestration started", "Long-running agent workflow initiated."],
   orchestration_completed: ["Orchestration completed", "All phases executed."],
   nim_threat_analysis_completed: ["NIM analysis complete", "Nemotron threat assessment finished."],
+  gpt_evidence_review_completed: ["GPT-5.6 evidence review complete", "Independent advisory decision recorded with cited evidence."],
+  gpt_evidence_review_skipped: ["GPT-5.6 evidence review skipped", "Add OPENAI_API_KEY to enable the independent evidence judge."],
+  gpt_evidence_review_failed: ["GPT-5.6 evidence review unavailable", "Deterministic security verdict remains authoritative."],
   no_impact_evidence: ["No-impact evidence", "VEX: vulnerable code not in execute path."],
   exploit_replayed_against_patch: ["Exploit replay blocked", "Mutated exploit blocked after patch - adversarial verification."],
   openshell_audit_completed: ["OpenShell audit done", "Policy enforced, denied actions logged."],
@@ -232,7 +245,10 @@ function setVerdict(panel, val, cap, verdict, kind) {
   panel.classList.remove("is-blocked", "is-safe", "is-failed");
   text(val, verdictLabel(verdict));
   if (verdict === "blocked") { panel.classList.add("is-blocked"); text(cap, "Security invariant violated."); }
-  else if (verdict === "safe") { panel.classList.add("is-safe"); text(cap, "No findings detected."); }
+  else if (verdict === "safe") {
+    panel.classList.add("is-safe");
+    text(cap, kind === "patch" ? "Patch passed deterministic verification." : "No findings detected.");
+  }
   else if (verdict === "failed") { panel.classList.add("is-failed"); text(cap, "Proof incomplete."); }
   else { text(cap, "Awaiting results."); }
 }
@@ -858,19 +874,133 @@ function renderRun(run) {
   setVerdict(ui.candidatePanel, ui.candidateVerdict, ui.candidateCaption, run.candidate_verdict, "candidate");
   setVerdict(ui.patchPanel, ui.patchVerdict, ui.patchCaption, run.patch_verdict, "patch");
   text(ui.integrationHealth, verdictLabel(run.integration_health));
+  renderReleaseEvidence(run.result);
+}
+
+function renderReleaseEvidence(result) {
+  if (!result) return;
+  const finding = result.findings?.[0];
+  if (finding) {
+    ui.findingEmpty.hidden = true; ui.findingDetail.hidden = false;
+    text(ui.findingSeverity, verdictLabel(finding.severity));
+    text(ui.findingRule, finding.rule_id);
+    text(ui.findingTitle, finding.title);
+    text(ui.findingDescription, finding.description);
+    text(ui.findingEndpoint, finding.endpoint || "source analysis");
+    text(ui.findingLocation, `${finding.path || "unknown"}:${finding.line || "—"}`);
+    text(ui.findingConfidence, finding.confidence);
+    text(ui.findingInvariant, finding.invariant);
+  }
+
+  const candidates = result.candidates || [];
+  text(ui.candidateCount, `${candidates.length} CANDIDATE${candidates.length === 1 ? "" : "S"}`);
+  ui.candidateList.replaceChildren();
+  candidates.forEach(candidate => {
+    const item = document.createElement("li"); item.className = "candidate-row";
+    [
+      candidate.source,
+      candidate.verified ? "SAFE" : "BLOCKED",
+      `${candidate.changed_lines ?? "—"} lines`,
+      candidate.verification?.status || "unknown",
+      candidate.candidate_id === result.selected_candidate_id ? "SELECTED" : "REJECTED",
+    ].forEach(value => { const span = document.createElement("span"); text(span, verdictLabel(value)); item.append(span); });
+    ui.candidateList.append(item);
+  });
+  if (!candidates.length) {
+    const empty = document.createElement("li"); empty.className = "candidate-empty";
+    text(empty, "No patch candidates were produced."); ui.candidateList.append(empty);
+  }
+
+  const bundle = result.patch_bundle;
+  if (bundle) {
+    text(ui.patchDigest, bundle.patch_sha256);
+    text(ui.changedFiles, bundle.changed_files?.length ?? 0);
+    text(ui.patchRef, result.selected_candidate_id || "VERIFIED PATCH");
+    ui.copyDigest.disabled = false; ui.downloadEvidence.disabled = false;
+  }
+
+  const verification = result.verification;
+  if (verification) {
+    const checks = Object.values(verification.checks || {});
+    const passed = checks.filter(Boolean).length;
+    text(ui.verificationStatus, verdictLabel(verification.status));
+    text(ui.testCount, `${passed}/${checks.length}`);
+    text(ui.verificationDuration, `${verification.duration_ms} ms`);
+    text(ui.verificationOutput, [verification.stdout, verification.stderr].filter(Boolean).join("\n") || "Verification completed without console output.");
+  }
+
+  renderGptEvidenceReview(result.openai_evidence_review);
+}
+
+function renderGptEvidenceReview(review) {
+  if (!review) return;
+  text(ui.gptReviewStatus, verdictLabel(review.status));
+  if (review.status !== "completed") {
+    ui.gptReviewEmpty.hidden = false; ui.gptReviewDetail.hidden = true;
+    text(ui.gptReviewEmpty, review.reason || "GPT-5.6 review is unavailable; deterministic verdict remains authoritative.");
+    return;
+  }
+  ui.gptReviewEmpty.hidden = true; ui.gptReviewDetail.hidden = false;
+  text(ui.gptReviewDecision, verdictLabel(review.decision));
+  text(ui.gptReviewRisk, verdictLabel(review.risk_level));
+  text(ui.gptReviewModel, review.model);
+  text(ui.gptReviewSummary, review.summary);
+  const checks = review.required_human_checks || [];
+  text(ui.gptReviewHumanChecks, checks.length ? `Required human checks: ${checks.join(" · ")}` : "Human review remains required before merge or deployment.");
+}
+
+function resetReleaseEvidence() {
+  ui.timeline.replaceChildren(); text(ui.eventCount, "0 EVENTS");
+  ui.findingEmpty.hidden = false; ui.findingDetail.hidden = true;
+  text(ui.findingSeverity, "PENDING");
+  text(ui.candidateCount, "0 CANDIDATES");
+  ui.candidateList.replaceChildren();
+  const candidateEmpty = document.createElement("li");
+  candidateEmpty.className = "candidate-empty";
+  text(candidateEmpty, "Waiting for isolated patch candidates.");
+  ui.candidateList.append(candidateEmpty);
+  text(ui.patchDigest, "Waiting for a verified patch…");
+  text(ui.changedFiles, "—"); text(ui.patchRef, "AWAITING PROOF");
+  ui.copyDigest.disabled = true; ui.downloadEvidence.disabled = true;
+  text(ui.verificationStatus, "NOT RUN"); text(ui.testCount, "—");
+  text(ui.verificationDuration, "—");
+  text(ui.verificationOutput, "Awaiting isolated patch verification.");
+  text(ui.gptReviewStatus, "AWAITING");
+  ui.gptReviewEmpty.hidden = false; ui.gptReviewDetail.hidden = true;
+  text(ui.gptReviewEmpty, "Waiting for deterministic proof before requesting an advisory review.");
 }
 
 async function refreshRun(runId) {
   try {
     const [run, events] = await Promise.all([api(`/api/runs/${encodeURIComponent(runId)}`), api(`/api/runs/${encodeURIComponent(runId)}/events`)]);
     renderRun(run); renderEvents(ui.timeline, events);
+    text(ui.eventCount, `${events.length} EVENT${events.length === 1 ? "" : "S"}`);
     if (["queued", "running"].includes(run.lifecycle)) state.pollTimer = setTimeout(() => refreshRun(runId), 450);
     else { ui.runButton.disabled = false; ui.runButton.querySelector("span").textContent = "Start proof run"; }
   } catch (err) { ui.runButton.disabled = false; showError(ui.error, err.message); }
 }
 
+async function copyPatchDigest() {
+  const digest = state.currentRun?.result?.patch_bundle?.patch_sha256;
+  if (!digest) return;
+  await navigator.clipboard.writeText(digest);
+  text(ui.copyDigest, "Copied");
+  setTimeout(() => text(ui.copyDigest, "Copy digest"), 1200);
+}
+
+function downloadReleaseEvidence() {
+  if (!state.currentRun?.result) return;
+  const blob = new Blob([JSON.stringify(state.currentRun, null, 2)], { type: "application/json" });
+  const anchor = document.createElement("a");
+  anchor.href = URL.createObjectURL(blob);
+  anchor.download = `sentinelforge-evidence-${state.currentRun.run_id}.json`;
+  anchor.click();
+  URL.revokeObjectURL(anchor.href);
+}
+
 async function createRun(e) {
   e?.preventDefault(); clearError(ui.error); clearTimeout(state.pollTimer);
+  resetReleaseEvidence();
   ui.runButton.disabled = true; ui.runButton.querySelector("span").textContent = "Starting…";
   try {
     const run = await api("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repository: ui.repository.value.trim(), remediate: ui.remediate.checked }) });
@@ -886,7 +1016,7 @@ const PHASE_ICONS = {
   dependency_scan: "📦", pattern_scan: "🔍", threat_learning: "🧠",
   auth_attack: "⚔️", injection_attack: "💉", zero_day_hunting: "🔮",
   custom_exploit: "💻", hiddenlayer_scan: "🛡️", openshell_audit: "🔒",
-  nim_analysis: "🤖", attestation: "📝", complete: "✅",
+  nim_analysis: "🤖", gpt_evidence_review: "✦", attestation: "📝", complete: "✅",
   // handler-emitted aliases
   attacking: "⚔️", safety: "🛡️", openshell: "🔒", patch_pr: "🔧",
 };
@@ -900,6 +1030,7 @@ const PHASE_NAMES = {
   injection_attack: "Injection Attack", zero_day_hunting: "Zero-Day Hunting",
   custom_exploit: "Custom Exploit Writer", hiddenlayer_scan: "HiddenLayer Safety",
   openshell_audit: "OpenShell Policy Audit", nim_analysis: "NIM Threat Analysis",
+  gpt_evidence_review: "GPT-5.6 Evidence Judge",
   attestation: "Signed Attestation", complete: "Complete",
 };
 
@@ -908,7 +1039,7 @@ const PHASE_ORDER = [
   "cve_ingestion", "mapping", "dependency_scan", "pattern_scan",
   "threat_learning", "auth_attack", "injection_attack",
   "zero_day_hunting", "custom_exploit", "hiddenlayer_scan",
-  "openshell_audit", "nim_analysis", "attestation", "complete",
+  "openshell_audit", "nim_analysis", "gpt_evidence_review", "attestation", "complete",
 ];
 
 function renderLiveProgressBar(phases, currentPhase) {
@@ -1180,6 +1311,7 @@ function renderPentestRun(data) {
       const hasCustom = (results.custom_exploits?.length || 0) > 0;
       const adv = results.adversarial_verification || [];
       const signed = results.signed_attestation;
+      const gptReview = results.openai_evidence_review;
       
       if (hasFindings || hasCustom || results.summary) {
         ui.finalReportEmpty.hidden = true;
@@ -1197,9 +1329,10 @@ function renderPentestRun(data) {
           `3. PATCH: patch_engineer agent generates competing patches via deterministic + Nemotron via NIM/vLLM, minimal blast radius (<3 files, <100 lines)`,
           `4. VERIFICATION: adversarial_verifier mutates original exploit 3 ways (lowercase, url-encoded, param pollution) and replays against patched artifact - must all be BLOCKED per PLAN 7.4`,
           `5. ATTESTATION: Signed JSON with HMAC hash chain, evidence hash ${signed?.evidence_hash?.slice(0,16) || 'pending'}..., stored in .sentinelforge/attestations/`,
-          `6. PR: GitHub API creates branch sentinelforge/fix-{rule}, push, gh pr create with body containing severity, rule_id, SHA256, evidence hash - requires human review`,
-          `7. HUMAN REVIEW GATE: Per agents.yaml no_agent_can_merge_pr: true + branch protection requiring 1 approver + status checks. If functionality change (existing tests fail or blast radius > limits), release BLOCKED until human approves.`,
-          `8. FINAL REPORT: This report + attestation + VEX doc + SARIF + Check Runs + PR. If BLOCKED, release pipeline stops.`
+          `6. GPT-5.6 REVIEW: ${gptReview?.status === 'completed' ? `${String(gptReview.decision).toUpperCase()} - ${gptReview.summary}` : 'Awaiting OPENAI_API_KEY. Deterministic verdict remains authoritative.'}`,
+          `7. PR: GitHub creates a draft branch and pull request containing the finding, receipt hash, verification result, and human-review requirement.`,
+          `8. HUMAN REVIEW GATE: Agents cannot merge or deploy. Failed tests, unresolved findings, or excessive blast radius keep the release blocked.`,
+          `9. FINAL REPORT: Evidence bundle, signed attestation, VEX, SARIF, Check Runs, draft PR, and the advisory GPT-5.6 decision.`
         ];
         
         const list = document.createElement("ol");
@@ -1211,6 +1344,14 @@ function renderPentestRun(data) {
           list.append(li);
         });
         content.append(list);
+
+        if (gptReview) {
+          const judge = document.createElement("div");
+          judge.className = "gpt-evidence-decision";
+          const decision = gptReview.status === "completed" ? verdictLabel(gptReview.decision) : verdictLabel(gptReview.status);
+          judge.textContent = `GPT-5.6 EVIDENCE JUDGE · ${decision} · Advisory only; human review remains required.`;
+          content.append(judge);
+        }
         
         if (adv.length > 0) {
           const advHeader = document.createElement("div");
@@ -1286,6 +1427,7 @@ function startPentestStream(runId) {
     pentestEventSource.close();
     pentestEventSource = null;
     // Polling fallback keeps the UI moving even if SSE drops
+    startPentestPolling(runId);
   };
 }
 
@@ -1294,7 +1436,7 @@ function startPentestPolling(runId) {
   stopPentestPolling();
   state.pentestPollTimer = setInterval(async () => {
     try {
-      const data = await api(`/api/pentest/${encodeURIComponent(runId)}`);
+      const data = await api(`/api/pentest/${encodeURIComponent(runId)}?compact=true`);
       renderPentestRun(data);
       const run = data.pentest_run;
       if (run && !["queued", "running"].includes(run.status)) {
@@ -1305,6 +1447,7 @@ function startPentestPolling(runId) {
         ui.pentestButton.disabled = false;
         ui.pentestButton.querySelector("span").textContent = "Start pentest";
         loadPentestRuns();
+        refreshPentestRun(runId);
       }
     } catch {}
   }, 3000);
@@ -1378,7 +1521,7 @@ async function createPentest(e) {
 }
 
 function watchPentestRun(runId) {
-  // Attach live stream + polling fallback + persistence
+  // Attach the live stream. Polling starts only if the stream drops.
   state.currentPentestStartedAt = new Date().toISOString();
   state.maxRunSeconds = 1800;
   saveActivePentest(runId);
@@ -1387,7 +1530,6 @@ function watchPentestRun(runId) {
   renderLiveProgressBar([], "init");
   startElapsedClock(state.currentPentestStartedAt, state.maxRunSeconds);
   startPentestStream(runId);
-  startPentestPolling(runId);
 }
 
 async function refreshPentestRun(runId) {
@@ -1493,6 +1635,20 @@ async function checkIntegrations() {
     const nimSettingsDot = document.querySelector("#nim-settings-dot");
     const nimSettingsLabel = document.querySelector("#nim-settings-status");
     if (nimSettingsDot) { nimSettingsDot.classList.toggle("safe", nimOk); nimSettingsDot.classList.toggle("waiting", !nimOk); text(nimSettingsLabel, nimOk ? `Ready (${integrations.nvidia_nim?.model})` : "Awaiting API key"); }
+    const openaiOk = integrations.openai_gpt56?.status === "configured";
+    if (ui.openaiIntegration) {
+      const openaiDot = ui.openaiIntegration.querySelector(".status-dot");
+      openaiDot.classList.toggle("safe", openaiOk);
+      openaiDot.classList.toggle("waiting", !openaiOk);
+      text(ui.openaiIntegrationStatus, openaiOk ? "READY" : "KEY");
+    }
+    const openaiSettingsDot = document.querySelector("#openai-settings-dot");
+    const openaiSettingsLabel = document.querySelector("#openai-settings-status");
+    if (openaiSettingsDot) {
+      openaiSettingsDot.classList.toggle("safe", openaiOk);
+      openaiSettingsDot.classList.toggle("waiting", !openaiOk);
+      text(openaiSettingsLabel, openaiOk ? `Ready (${integrations.openai_gpt56?.model})` : "Awaiting OPENAI_API_KEY");
+    }
   } catch { ui.connectionDot.classList.remove("safe"); text(ui.connectionLabel, "CONTROL PLANE OFFLINE"); }
 }
 
@@ -1534,6 +1690,8 @@ function initialize() {
 
   ui.form.addEventListener("submit", createRun);
   ui.repeatRun.addEventListener("click", () => createRun());
+  ui.copyDigest.addEventListener("click", copyPatchDigest);
+  ui.downloadEvidence.addEventListener("click", downloadReleaseEvidence);
   ui.intelligenceForm.addEventListener("submit", loadRedHatIntelligence);
 
   ui.pentestForm.addEventListener("submit", createPentest);

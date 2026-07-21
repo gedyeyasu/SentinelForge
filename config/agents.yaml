@@ -300,6 +300,24 @@ agents:
       - create PR draft requiring human review
       - final report with timeline Finding->Patch->Verification->PR->Human Gate->Release Blocked
 
+  gpt56_evidence_judge:
+    description: Independent advisory review of redacted, hash-addressed release evidence using the OpenAI Responses API
+    inputs:
+      - deterministic_verdict
+      - finding_counts
+      - receipt_ids
+      - evidence_hashes
+      - test_summary
+      - policy_denials
+      - human_gate
+    allowed_tools: []
+    output: structured_advisory_decision_with_evidence_ids_and_human_checks
+    model: openai/gpt-5.6
+    max_tokens: 2048
+    spawn_allowed: false
+    can_write_repo: false
+    safety: Cannot attack, edit, open or merge pull requests, deploy, or override deterministic verdicts
+
 routing:
   phases:
     - init
@@ -315,6 +333,7 @@ routing:
     - hiddenlayer_scan
     - openshell_audit
     - nim_analysis
+    - gpt_evidence_review
     - attestation
     - complete
 

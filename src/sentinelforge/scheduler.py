@@ -62,6 +62,10 @@ class PentestScheduler:
     def set_executor(self, execute_fn: Any) -> None:
         self._execute_fn = execute_fn
 
+    @property
+    def running(self) -> bool:
+        return self._running and self._task is not None and not self._task.done()
+
     async def start(self) -> None:
         if self._running:
             return
@@ -129,6 +133,7 @@ class PentestScheduler:
             request = PentestRunRequest(
                 repository=schedule.repository,
                 scope_file=schedule.scope_file,
+                mode=schedule.mode,
             )
 
             await asyncio.to_thread(

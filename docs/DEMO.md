@@ -1,5 +1,7 @@
 # SentinelForge Demo Script (5-6 min) — Latest Version v0.2.0 — PLAN §15 + All New Features
 
+> **Legacy AITX submission artifact.** It is retained as project history and does not describe the current OpenAI Build Week submission. Use [`../README.md`](../README.md), [`OPENAI_BUILD_WEEK.md`](OPENAI_BUILD_WEEK.md), and [`YOUTUBE_SCRIPT.md`](YOUTUBE_SCRIPT.md).
+
 > **Latest version:** 14 agents (was 10), custom exploit writer that writes new Python file per run (proof not toy), GitHub OAuth super cool one-click connect, Django route discovery for Cini backend, Fly.io deployment at https://sentinelforge.fly.dev, HiddenLayer Track 3 runtime security, SBOM+VEX, adversarial verifier, signed attestation, human review gate.
 
 This is the exact timeline judges will see. One-command reset required.
@@ -158,7 +160,7 @@ Show:
 - Existing repo tests pass + generated security regression test passes
 - Patch blast radius: 2 lines changed, 1 file (minimal per PLAN §7.4)
 - Evidence report panel: **Custom Exploits Written by Agent (2) - PROOF NOT TOY** blue border with file badge + **Evidence Reports with Create Patch PR button** (one per receipt) — click PR button shows alert flow Finding -> Patch via Nemotron -> Adversarial verifier 3 mutations -> PR draft requiring human review -> Release BLOCKED
-- Final report panel 8 steps: Finding -> Custom exploits -> Patch minimal -> Verification 3 mutations blocked -> Attestation signed HMAC hash chain -> PR draft -> Human review gate -> Final report with buttons View Signed Attestation / View Custom Exploits
+- Final report panel 8 steps: Finding -> Custom exploits -> Patch minimal -> Verification 3 mutations blocked -> Ed25519-signed attestation -> PR draft -> Human review gate -> Final report with buttons View Signed Attestation / View Custom Exploits
 - Human Review Gate panel: REQUIRED - RELEASE BLOCKED with checklist no_agent_can_merge_pr true, patch must pass 3 mutations + existing tests, secret redaction verified, signed attestation hash chain, human review required for functionality change
 - Regression test:
 
@@ -194,7 +196,7 @@ Show deployed live at https://sentinelforge.fly.dev (we fixed wrong project from
 
 - Cost: $0.02 NIM tokens, $0 latency vs human review 2 hours, token trace per agent in `/api/pentest/{id}/traces`
 - Human approval gate: PR created as draft, requires 1 approver via branch protection, no_agent_can_merge_pr true, release BLOCKED until human approves if functionality change
-- Safety boundary: staging only (or authorized prod with ownership verification), deny-by-default 13 rules including DB nuking blocked, rate-limited 3 rps (1 rps for live prod), kill switch .sentinelforge/STOP, secret redaction verified via redaction.py, signed attestation HMAC hash chain tamper detection
+- Safety boundary: staging only (or authorized prod with ownership verification), deny-by-default 13 rules including DB nuking blocked, rate-limited 3 rps (1 rps for live prod), kill switch .sentinelforge/STOP, secret redaction verified via redaction.py, Ed25519-signed attestation tamper detection
 - Commercial value: proof-carrying attestation with signed evidence hash chain + custom exploit files written at runtime + SARIF + Check Runs + PR requiring human review, not just scanner noise, beats Snyk/Wiz/XBOW
 - Tech stack: Python 3.12, FastAPI, SQLite event-sourced + Supabase Postgres RLS for SaaS, httpx MockTransport, Vanilla JS SPA forensic dark theme, NIM + vLLM + NemoClaw + OpenShell + Red Hat CSAF/OVAL/VEX + HiddenLayer Track 3 runtime + GitHub OAuth + SARIF
 - Deployment: Dockerfile Python 3.12 slim non-root appuser, git + gh CLI, Fly.io / Render / AWS App Runner, volume for persistence, health check /health, env secrets set via fly secrets set
@@ -225,9 +227,8 @@ Document in `HEARTBEAT.md` rehearsal section: five runs finish inside target tim
 - [ ] Show exploit receipt with replay curl and replay python file path
 - [ ] Show evidence report panel with Create Patch PR buttons + final report 8 steps + human review gate REQUIRED - RELEASE BLOCKED
 - [ ] Show patch diff minimal 2 lines
-- [ ] Show attestation JSON with evidence_hash and signature and HMAC hash chain and VEX doc
+- [ ] Show attestation JSON with evidence_hash, Ed25519 signature, embedded public verification key, and VEX doc
 - [ ] Show adversarial verifier 3 mutations blocked events
 - [ ] Show PR body with severity, rule, SHA256, evidence hash, human review gate notice, draft PR
 - [ ] Show Cini backend scan: scan /Users/gedeoneyasu/Projects/Cini-BackEnd finds 4 Django BOLA findings
 - [ ] Show deployed live at https://sentinelforge.fly.dev health OK and OAuth configured
-

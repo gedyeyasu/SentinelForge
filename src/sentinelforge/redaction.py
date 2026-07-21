@@ -9,7 +9,10 @@ SECRET_PATTERNS = [
     re.compile(r"(?i)(bearer\s+[A-Za-z0-9\-_\.=]+)"),
     re.compile(r"(?i)(api[_-]?key\s*[:=]\s*['\"]?[A-Za-z0-9\-_]{20,}['\"]?)"),
     re.compile(r"(?i)(x-api-key\s*[:=]\s*['\"]?[A-Za-z0-9\-_]{20,}['\"]?)"),
-    re.compile(r"(?i)(GITHUB_TOKEN|NVIDIA_API_KEY|HIDDENLAYER_API_KEY)\s*=\s*.+"),
+    re.compile(
+        r"(?i)(GITHUB_TOKEN|NVIDIA_API_KEY|OPENAI_API_KEY|HIDDENLAYER_API_KEY)"
+        r"\s*=\s*.+"
+    ),
     re.compile(r"x-access-token:[^@\s]+@"),
     re.compile(r"(?i)(password|secret|token)\s*[:=]\s*['\"][^'\"]{8,}['\"]"),
     re.compile(r"-----BEGIN (?:RSA )?PRIVATE KEY-----"),
@@ -36,7 +39,17 @@ def redact_dict(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     """Recursively redact dict values. Returns (redacted_dict, did_redact)."""
     redacted_any = False
     result: dict[str, Any] = {}
-    sensitive_keys = {"authorization", "x-api-key", "api_key", "token", "password", "secret", "github_token", "nvidia_api_key"}
+    sensitive_keys = {
+        "authorization",
+        "x-api-key",
+        "api_key",
+        "token",
+        "password",
+        "secret",
+        "github_token",
+        "nvidia_api_key",
+        "openai_api_key",
+    }
     for k, v in data.items():
         if k.lower() in sensitive_keys:
             result[k] = REDACTED_PLACEHOLDER

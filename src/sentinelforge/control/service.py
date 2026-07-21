@@ -13,6 +13,9 @@ from sentinelforge.control.models import (
 from sentinelforge.control.storage import SQLiteRunStore
 from sentinelforge.detectors import FastAPIBOLADetector
 from sentinelforge.inference import NIMPatchProposer, PatchProposer
+from sentinelforge.inference.openai_evidence import (
+    OpenAIEvidenceReviewer,
+)
 from sentinelforge.remediation import (
     CandidateEvaluation,
     FastAPIBOLAPatcher,
@@ -34,6 +37,7 @@ class DetectionRunService:
         workspace_root: Path,
         allowed_roots: tuple[Path, ...],
         patch_proposer: PatchProposer | None = None,
+        evidence_reviewer: OpenAIEvidenceReviewer | None = None,
     ) -> None:
         self.store = store
         self.workspace_root = workspace_root.resolve()
@@ -52,6 +56,7 @@ class DetectionRunService:
                 else None
             )
         self.patch_proposer = patch_proposer
+        self.evidence_reviewer = evidence_reviewer or OpenAIEvidenceReviewer()
         if not self.allowed_roots:
             raise ValueError("At least one allowed repository root is required")
 
@@ -235,6 +240,14 @@ class DetectionRunService:
                     "duration_ms": report.duration_ms,
                 },
             )
+            evidence_review, review_degraded = self._review_release_evidence(
+                run_id=run_id,
+                finding=finding.to_dict(),
+                patch_verdict=patch_verdict,
+                selected=selected,
+            )
+            if review_degraded:
+                integration_health = IntegrationHealth.DEGRADED
             return self.store.update_run(
                 run_id,
                 lifecycle=RunLifecycle.COMPLETED,
@@ -246,6 +259,7 @@ class DetectionRunService:
                     "verification": report.to_dict(),
                     "selected_candidate_id": selected.candidate_id,
                     "candidates": candidate_results,
+                    "openai_evidence_review": evidence_review,
                 },
             )
         except Exception as error:
@@ -273,6 +287,100 @@ class DetectionRunService:
             "verification": candidate.verification.to_dict(),
         }
 
+    def _review_release_evidence(
+        self,
+        *,
+        run_id: str,
+        finding: dict[str, object],
+        patch_verdict: SecurityVerdict,
+        selected: CandidateEvaluation,
+    ) -> tuple[dict[str, object], bool]:
+        """Ask GPT-5.6 to judge bounded proof, never to authorize an action."""
+
+        if not self.evidence_reviewer.configured:
+            self.store.append_event(
+                run_id,
+                phase="evidence_review",
+                kind="gpt_evidence_review_skipped",
+                payload={"reason": "OPENAI_API_KEY_not_configured"},
+            )
+            return (
+                {
+                    "status": "skipped",
+                    "reason": "OPENAI_API_KEY is not configured",
+                    "advisory_only": True,
+                },
+                False,
+            )
+
+        report = selected.verification
+        bundle = selected.bundle
+        try:
+            review = self.evidence_reviewer.review(
+                run_id=run_id,
+                candidate_verdict=patch_verdict.value.upper(),
+                evidence={
+                    "candidate_verdict": patch_verdict.value.upper(),
+                    "finding_counts": {
+                        "total": 1,
+                        str(finding.get("severity", "unknown")): 1,
+                    },
+                    "receipt_ids": [str(finding.get("finding_id", "finding"))],
+                    "evidence_hashes": [bundle.patch_sha256],
+                    "verification": {
+                        "status": report.status.value,
+                        "exit_code": report.exit_code,
+                        "duration_ms": report.duration_ms,
+                        "checks": report.checks,
+                    },
+                    "tests": {
+                        "command": list(report.command),
+                        "all_checks_passed": all(report.checks.values()),
+                    },
+                    "policy_denials": [],
+                    "threat_assessment": {
+                        "selected_candidate": selected.candidate_id,
+                        "source": selected.source,
+                        "changed_lines": selected.changed_lines,
+                    },
+                    "human_gate": {
+                        "required": True,
+                        "model_authority": "advisory_only",
+                        "merge_or_deploy_allowed": False,
+                    },
+                },
+            )
+        except Exception as error:
+            self.store.append_event(
+                run_id,
+                phase="evidence_review",
+                kind="gpt_evidence_review_failed",
+                payload={"error_type": type(error).__name__},
+            )
+            return (
+                {
+                    "status": "failed",
+                    "reason": "GPT-5.6 evidence review was unavailable",
+                    "advisory_only": True,
+                },
+                True,
+            )
+
+        result = review.model_dump(mode="json") | {"status": "completed"}
+        self.store.append_event(
+            run_id,
+            phase="evidence_review",
+            kind="gpt_evidence_review_completed",
+            payload={
+                "decision": review.decision.value,
+                "risk_level": review.risk_level,
+                "evidence_count": len(review.evidence_ids),
+                "model": review.model,
+                "advisory_only": True,
+            },
+        )
+        return result, False
+
     def _authorized_repository(self, repository: Path) -> Path:
         resolved = repository.resolve()
         if not resolved.is_dir():
@@ -284,3 +392,8 @@ class DetectionRunService:
                 f"Repository {resolved} is outside the configured allowed roots"
             )
         return resolved
+
+    def authorize_repository(self, repository: Path) -> Path:
+        """Validate a repository path without creating a run record."""
+
+        return self._authorized_repository(repository)

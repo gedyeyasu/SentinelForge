@@ -7,15 +7,15 @@
 Per PLAN.md §6 and Track 1 (Best NemoClaw + OpenShell):
 
 - **Persistent orchestrator** that maintains run state + memory across heartbeat ticks (not just single run)
-- **Fixed multi-agent roster** in `config/agents.yaml` (now 14 agents)
+- **Fixed multi-agent roster** in `config/agents.yaml` (now 15 agents)
 - **Heartbeat file** `HEARTBEAT.md` + `.nemo/HEARTBEAT.md` with last_cursor, advisories_seen, learning delta
-- **Live run** via orchestrator that survives restarts (event-sourced from SQLite)
+- **Event-sourced run evidence** in SQLite. In-flight worker recovery after a process restart is not yet implemented.
 
 ## NemoClaw Files (Where Setup Is)
 
 | File | Location | Purpose |
 |------|----------|---------|
-| **Roster** | `config/agents.yaml` | 14 bounded agents with inputs/tools/output/model, spawn_depth 2, no_agent_can_merge_pr true |
+| **Roster** | `config/agents.yaml` | 15 bounded agents with inputs/tools/output/model, spawn_depth 2, no_agent_can_merge_pr true |
 | **Heartbeat** | `HEARTBEAT.md` + `.nemo/HEARTBEAT.md` | last_cursor, advisories_seen, dedup_key, learning delta Run1 vs Run2, advisory ingestion sources, fixed roster, spawn rules |
 | **Orchestrator** | `src/sentinelforge/nemoclaw/orchestrator.py` | `NemoClawOrchestrator` extends `AgentOrchestrator` with persistent memory `target_memory` table, heartbeat tick, learning delta, roster proof |
 | **Heartbeat** | `src/sentinelforge/nemoclaw/heartbeat.py` | `NemoClawHeartbeat` reads Red Hat CSAF, matches advisory to dependency inventory, triggers safe reproduction, remediation, retesting, writes HEARTBEAT.md |
@@ -261,7 +261,7 @@ cat HEARTBEAT.md
 ## Docs Location
 
 - **This file:** `docs/NEMOCLAW_SETUP.md` — NemoClaw setup with agents that work on code, create PR, patch after exploit
-- **Roster:** `config/agents.yaml` — 14 agents with code_worker, pr_creator, patch_and_pr
+- **Roster:** `config/agents.yaml` — 15 agents including the GPT-5.6 evidence judge
 - **Orchestrator:** `src/sentinelforge/nemoclaw/orchestrator.py` — NemoClawOrchestrator extends AgentOrchestrator with persistent memory
 - **Heartbeat:** `src/sentinelforge/nemoclaw/heartbeat.py` — Heartbeat tick reads Red Hat, matches dependency, triggers pentest
 - **Code Worker:** `src/sentinelforge/agents/code_worker.py` — Works on code, generates patches
@@ -275,7 +275,7 @@ cat HEARTBEAT.md
 
 **NemoClaw bounty (Best NemoClaw + OpenShell):**
 
-- [x] Fixed roster 14 agents in `config/agents.yaml` with inputs/tools/output/model/budget
+- [x] Fixed roster 15 agents in `config/agents.yaml` with inputs/tools/output/model/budget
 - [x] HEARTBEAT.md checked in with last_cursor, advisories_seen, dedup_key, learning delta Run1 vs Run2, advisory ingestion sources
 - [x] Persistent memory target_memory table with endpoint_map, role_graph, prior_attacks, learning_delta
 - [x] Advisory cursor dedup no duplicate runs for same RHSA

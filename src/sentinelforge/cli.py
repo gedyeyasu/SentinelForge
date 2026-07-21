@@ -134,7 +134,7 @@ def bench_command(args: argparse.Namespace) -> int:
     # Batched benchmark per concurrency level
     results = {}
     for conc in concurrency:
-        async def _run_conc():
+        async def _run_conc(concurrency_level: int = conc):
             loop = asyncio.get_event_loop()
             tasks = []
             def _one():
@@ -142,7 +142,7 @@ def bench_command(args: argparse.Namespace) -> int:
                     return proposer.propose(finding, str(root))
                 except Exception as e:
                     return str(e)
-            for _ in range(conc):
+            for _ in range(concurrency_level):
                 tasks.append(loop.run_in_executor(None, _one))
             s = time.monotonic()
             await asyncio.gather(*tasks)

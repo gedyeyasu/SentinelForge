@@ -30,6 +30,7 @@ def test_orchestrator_plan_phases_standard(tmp_path: Path) -> None:
     assert Phase.DEPENDENCY_SCAN in phases
     assert Phase.PATTERN_SCAN in phases
     assert Phase.HIDDENLAYER_SCAN in phases
+    assert Phase.GPT_EVIDENCE_REVIEW in phases
 
 
 def test_orchestrator_plan_phases_targeted(tmp_path: Path) -> None:

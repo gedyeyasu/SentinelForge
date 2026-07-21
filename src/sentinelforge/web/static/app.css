@@ -743,8 +743,16 @@ input:hover {
 }
 
 .competition-panel,
-.intelligence-panel {
+.intelligence-panel,
+.gpt-review-panel {
   grid-column: 1 / -1;
+}
+
+.gpt-evidence-decision {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--panel-inset);
 }
 
 .candidate-table-header,
@@ -1412,6 +1420,7 @@ input:hover {
   .competition-panel,
   .receipt-panel,
   .verification-panel,
+  .gpt-review-panel,
   .intelligence-panel {
     grid-column: 1 / -1;
   }

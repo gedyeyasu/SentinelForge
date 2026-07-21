@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 
 from sentinelforge.redaction import redact_dict
 
@@ -21,16 +27,27 @@ def _load_or_create_keypair(key_dir: Path = Path(".sentinelforge/keys")) -> Atte
     key_dir.mkdir(parents=True, exist_ok=True)
     priv_path = key_dir / "attestation_private.key"
     pub_path = key_dir / "attestation_public.key"
-    if priv_path.is_file() and pub_path.is_file():
+    if priv_path.is_file():
+        private_hex = priv_path.read_text().strip()
+        private_key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(private_hex))
+        public_hex = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        ).hex()
+        if not pub_path.is_file() or pub_path.read_text().strip() != public_hex:
+            pub_path.write_text(public_hex)
         return AttestationKeyPair(
-            private_key_hex=priv_path.read_text().strip(),
-            public_key_hex=pub_path.read_text().strip(),
+            private_key_hex=private_hex,
+            public_key_hex=public_hex,
         )
-    # Generate deterministic key pair for local use (not for prod - use KMS)
-    # Use HMAC-based pseudo key for demo - in production use Ed25519 via cryptography library
+
     seed = os.urandom(32)
     private_hex = seed.hex()
-    public_hex = hashlib.sha256(seed).hexdigest()
+    private_key = Ed25519PrivateKey.from_private_bytes(seed)
+    public_hex = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    ).hex()
     priv_path.write_text(private_hex)
     pub_path.write_text(public_hex)
     # Restrict perms
@@ -48,7 +65,7 @@ class SignedAttestation:
     signature: str
     public_key: str
     evidence_hash: str
-    algorithm: str = "hmac-sha256-demo"  # In production: ed25519
+    algorithm: str = "ed25519"
 
 
 class AttestationSigner:
@@ -105,6 +122,11 @@ class AttestationSigner:
                 else 0,
             },
             "threat_assessment": threat_assessment,
+            "evidence_review": (
+                safe_results.get("openai_evidence_review")
+                if isinstance(safe_results.get("openai_evidence_review"), dict)
+                else None
+            ),
             "compliance": {
                 "evidence_standard": "PLAN §7.3 8 fields",
                 "patch_standard": "PLAN §7.4 7 criteria",
@@ -117,29 +139,30 @@ class AttestationSigner:
 
         canonical_att = json.dumps(attestation, sort_keys=True)
         evidence_hash = hashlib.sha256(canonical_att.encode()).hexdigest()
-        # HMAC signature with private key
-        sig = hmac.new(
-            bytes.fromhex(self.keypair.private_key_hex),
-            canonical_att.encode(),
-            hashlib.sha256,
-        ).hexdigest()
+        private_key = Ed25519PrivateKey.from_private_bytes(
+            bytes.fromhex(self.keypair.private_key_hex)
+        )
+        sig = private_key.sign(canonical_att.encode()).hex()
 
         return SignedAttestation(
             attestation=attestation,
             signature=sig,
             public_key=self.keypair.public_key_hex,
             evidence_hash=evidence_hash,
-            algorithm="hmac-sha256-demo",
+            algorithm="ed25519",
         )
 
-    def verify(self, signed: SignedAttestation) -> bool:
+    @staticmethod
+    def verify(signed: SignedAttestation) -> bool:
         canonical = json.dumps(signed.attestation, sort_keys=True)
-        expected = hmac.new(
-            bytes.fromhex(self.keypair.private_key_hex),
-            canonical.encode(),
-            hashlib.sha256,
-        ).hexdigest()
-        return hmac.compare_digest(expected, signed.signature)
+        try:
+            public_key = Ed25519PublicKey.from_public_bytes(
+                bytes.fromhex(signed.public_key)
+            )
+            public_key.verify(bytes.fromhex(signed.signature), canonical.encode())
+        except (InvalidSignature, ValueError):
+            return False
+        return True
 
     def write_attestation(self, run_id: str, signed: SignedAttestation, out_dir: Path = Path(".sentinelforge/attestations")) -> Path:
         out_dir.mkdir(parents=True, exist_ok=True)

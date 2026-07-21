@@ -315,7 +315,7 @@ class NemotronPayloadSynthesizer:
         try:
             return body["choices"][0]["message"]["content"]
         except Exception as e:
-            raise PayloadGenerationError(f"No content in NIM response: {e}")
+            raise PayloadGenerationError(f"No content in NIM response: {e}") from e
 
     def _parse(self, content: str, route: str, method: str) -> PayloadBatch:
         stripped = content.strip()
@@ -336,7 +336,9 @@ class NemotronPayloadSynthesizer:
                     return PayloadBatch.model_validate(raw)
                 except Exception:
                     pass
-            raise PayloadGenerationError(f"Failed to parse payload batch: {content[:500]}")
+            raise PayloadGenerationError(
+                f"Failed to parse payload batch: {content[:500]}"
+            ) from None
 
     def _fallback_deterministic(
         self, route_path: str, method: str, framework: str, source_code: str

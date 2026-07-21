@@ -33,6 +33,7 @@ class Phase(StrEnum):
     HIDDENLAYER_SCAN = "hiddenlayer_scan"
     OPENSHELL_AUDIT = "openshell_audit"
     NIM_ANALYSIS = "nim_analysis"
+    GPT_EVIDENCE_REVIEW = "gpt_evidence_review"
     ATTESTATION = "attestation"
     COMPLETE = "complete"
 
@@ -54,6 +55,7 @@ PHASE_ORDER: list[Phase] = [
     Phase.HIDDENLAYER_SCAN,
     Phase.OPENSHELL_AUDIT,
     Phase.NIM_ANALYSIS,
+    Phase.GPT_EVIDENCE_REVIEW,
     Phase.ATTESTATION,
     Phase.COMPLETE,
 ]
@@ -75,6 +77,7 @@ PHASE_TO_PENTEST_PHASE: dict[Phase, PentestPhase] = {
     Phase.HIDDENLAYER_SCAN: PentestPhase.ATTACKING,
     Phase.OPENSHELL_AUDIT: PentestPhase.ATTACKING,
     Phase.NIM_ANALYSIS: PentestPhase.ATTACKING,
+    Phase.GPT_EVIDENCE_REVIEW: PentestPhase.ATTACKING,
     Phase.ATTESTATION: PentestPhase.ATTESTED,
     Phase.COMPLETE: PentestPhase.ATTESTED,
 }
@@ -96,6 +99,7 @@ _PHASE_NAMES: dict[Phase, str] = {
     Phase.HIDDENLAYER_SCAN: "HiddenLayer AI Scan",
     Phase.OPENSHELL_AUDIT: "OpenShell Audit",
     Phase.NIM_ANALYSIS: "NIM Threat Analysis",
+    Phase.GPT_EVIDENCE_REVIEW: "GPT-5.6 Evidence Review",
     Phase.ATTESTATION: "Generating Attestation",
     Phase.COMPLETE: "Complete",
 }
@@ -190,6 +194,10 @@ class AgentOrchestrator:
 
         if config.run_nim_analysis:
             phases.append(Phase.NIM_ANALYSIS)
+
+        # Independent advisory review is always visible. The handler records an
+        # explicit skipped result when OPENAI_API_KEY is not configured.
+        phases.append(Phase.GPT_EVIDENCE_REVIEW)
 
         phases.append(Phase.ATTESTATION)
         phases.append(Phase.COMPLETE)

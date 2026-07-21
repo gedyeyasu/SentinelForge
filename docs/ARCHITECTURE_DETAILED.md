@@ -206,7 +206,7 @@ Phase Handlers in pentest.py PentestService:
     - AdversarialVerifier: for each successful receipt, generates 3 mutations (lower case, url-encoded, param pollution), checks if patched artifact blocks them (heuristic: patch contains tenant_id + 404), emits exploit_replayed_against_patch blocked/bypassed events - satisfies PLAN §7.4 requirement
     - Scope + PolicyEngine budget remaining
     - Receipts redacted via redaction.py redact_receipt_dict() - Authorization headers -> [REDACTED_SECRET], no secret in persisted events per critical case #9
-    - Signed attestation: AttestationSigner generates keypair in .sentinelforge/keys/, hash chain of events (prev_hash linking), HMAC-SHA256 signature, writes .sentinelforge/attestations/attestation_{run_id}.json
+    - Signed attestation: AttestationSigner generates an Ed25519 keypair in .sentinelforge/keys/, signs the canonical attestation with the private key, embeds the public key for independent verification, and writes .sentinelforge/attestations/attestation_{run_id}.json
     - VEX summary included
     - Update pentest_runs with results_json containing safe_receipts, summary, adversarial_verification, validation, signed_attestation, vex_summary, custom_exploits, sbom
 
@@ -240,7 +240,7 @@ graph TD
     Q --> R[Adversarial Verifier<br/>3 mutations must fail<br/>after patch]
     R --> S{All Blocked?}
     S -->|No| Q
-    S -->|Yes| T[Release Auditor<br/>Signed Attestation<br/>Hash Chain + HMAC]
+    S -->|Yes| T[Release Auditor<br/>Signed Attestation<br/>Ed25519]
     T --> U[SARIF + Check Run<br/>+ PR Body<br/>+ Branch]
     U --> V[Human Approval Gate]
     V --> W[Merge/Deploy]

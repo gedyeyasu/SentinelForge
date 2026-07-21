@@ -91,7 +91,7 @@ Candidate eligible only when:
 
 ### 10. Signed Attestation (`attestation.py`)
 - Attestation JSON includes event chain hash (prev_hash linking)
-- Signed with HMAC-SHA256 via keypair in `.sentinelforge/keys/` (prod: Ed25519 via KMS)
+- Signed with Ed25519 using a private signing key in `.sentinelforge/keys/`; verification requires only the public key embedded in the attestation. Production deployments should move the private key into a managed key service.
 - Signature verified in dashboard
 - Tamper detection: changing any event breaks chain head hash
 
